@@ -1,0 +1,39 @@
+:root {
+    --industrial-blue: #0d6efd;
+    --override-orange: #fd7e14;
+}
+
+body {
+    background-color: #f8f9fa;
+    font-family: 'Inter', -apple-system, sans-serif;
+}
+
+.asset-card {
+    border: 1px solid #e0e0e0;
+    border-radius: 12px;
+    background: white;
+    transition: all 0.2s ease-in-out;
+}
+
+.asset-card.overridden {
+    border: 2px solid var(--override-orange);
+    background-color: #fffaf5;
+}
+
+.icon-container {
+    height: 80px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.icon-container i {
+    font-size: 2.5rem;
+    color: #495057;
+}
+
+.value-display {
+    font-family: 'JetBrains Mono', 'Courier New', monospace;
+    font-weight: 700;
+    color: #212529;
+}
