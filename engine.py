@@ -1,71 +1,52 @@
 import asyncio
-import struct
 import time
-import os
 import random
 
 from database import get_db_connection
 
-LOG_DIR = "simulation_logs"
 
-
-def pack_protocol_data(asset):
-    """
-    Packs data into industry-standard binary structures.
-    Formats:
-    - Modbus: [Timestamp(d)][UnitID(B)][FC(B)][Addr(H)][Value(H)]
-    - DNP3:   [Timestamp(d)][Index(H)][Grp(B)][Var(B)][Value(f)][Flags(B)]
-    - BACnet: [Timestamp(d)][Type(H)][Inst(I)][Prop(H)][Value(f)]
-    """
-    ts = time.time()
-    val = asset['current_value']
-    protocol = asset['protocol'].lower()
-
-    if protocol == "modbus":
-        # Scale to 16-bit Int (e.g., 25.5 -> 255)
-        scaled_val = int(val * 10)
-        return struct.pack('>dBBHH', ts, 1, 3, asset['address'], scaled_val)
-
-    elif protocol == "dnp3":
-        # Group 30 (Analog Input), Var 5 (Float32 with Flags), Flag 0x01 (Online)
-        return struct.pack('>dHBBfB', ts, asset['address'], 30, 5, float(val), 0x01)
-
-    elif protocol == "bacnet":
-        # Obj Type 2 (Analog Value), Prop 85 (Present Value)
-        return struct.pack('>dHIHf', ts, 2, asset['address'], 85, float(val))
-
-    elif protocol == "opcua":
-        # Basic OPC UA DataValue: [Timestamp(d)][StatusCode(I)][Value(f)]
-        return struct.pack('>dIf', ts, 0x00000000, float(val))
-
-
-async def simulation_loop(modbus_block):
+async def simulation_loop(modbus_block, bacnet_manager):
     while True:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        assets = cursor.execute("SELECT * FROM assets").fetchall()
+        conn = None
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            assets = cursor.execute("SELECT * FROM assets").fetchall()
 
-        for a in assets:
-            if not a['manual_override']:
-                # Physics calculation
-                noise = random.uniform(-a['drift_rate'], a['drift_rate'])
-                current = a['current_value'] if a['current_value'] is not None else a['min_range']
-                new_val = max(a['min_range'], min(a['max_range'], current + noise))
+            for a in assets:
+                asset_dict = dict(a)
 
-                cursor.execute("UPDATE assets SET current_value = ? WHERE id = ?", (new_val, a['id']))
+                # BACnet Write-Back Logic
+                if asset_dict['protocol'] == "bacnet" and asset_dict['sub_type'] == "Digital":
+                    remote_val = bacnet_manager.get_value(asset_dict['name'])
+                    if remote_val is not None and abs(remote_val - asset_dict['current_value']) > 0.01:
+                        cursor.execute("UPDATE assets SET current_value = ?, manual_override = 1 WHERE id = ?",
+                                       (remote_val, asset_dict['id']))
+                        asset_dict['current_value'] = remote_val
 
-                # Update Modbus Memory for live polling
-                if a['protocol'] == "modbus":
-                    modbus_block.setValues(a['address'], [int(new_val * 10)])
+                if not asset_dict['manual_override']:
+                    if asset_dict['sub_type'] == "Digital":
+                        # Discrete logic is static (NO=0, NC=1)
+                        new_val = 0.0 if asset_dict['is_normally_open'] else 1.0
+                    else:
+                        # Analog drift
+                        noise = random.uniform(-asset_dict['drift_rate'], asset_dict['drift_rate'])
+                        current = asset_dict['current_value'] or asset_dict['min_range']
+                        new_val = max(asset_dict['min_range'], min(asset_dict['max_range'], current + noise))
 
-                # Binary Logging to the specific file defined in GUI
-                fname = a['filename'] if a['filename'] else f"{a['name']}.bin"
-                if not fname.endswith(".bin"): fname += ".bin"
+                    if abs(new_val - (asset_dict['current_value'] or 0)) > 0.0001:
+                        cursor.execute("UPDATE assets SET current_value = ? WHERE id = ?", (new_val, asset_dict['id']))
+                        asset_dict['current_value'] = new_val
 
-                log_path = os.path.join(LOG_DIR, fname)
-                with open(log_path, "ab") as f:
-                    f.write(pack_protocol_data({**dict(a), 'current_value': new_val}))
+                # Egress Sync
+                if asset_dict['protocol'] == "modbus":
+                    modbus_block.setValues(asset_dict['address'], [int(asset_dict['current_value'] * 10)])
+                elif asset_dict['protocol'] == "bacnet":
+                    bacnet_manager.update_value(asset_dict['name'], asset_dict['current_value'], asset_dict['sub_type'])
 
-        conn.commit()
-        conn.close()
+            conn.commit()
+        except Exception as e:
+            print(f"[Engine] Error: {e}")
+        finally:
+            if conn: conn.close()
         await asyncio.sleep(1)
