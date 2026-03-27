@@ -25,10 +25,19 @@ modbus_block = ModbusSequentialDataBlock(0, [0] * 1000)
 modbus_context = ModbusServerContext(devices=ModbusDeviceContext(hr=modbus_block), single=True)
 
 class AssetIn(BaseModel):
-    name: str; type: str; sub_type: str; protocol: str; address: int
-    min_range: float = 0; max_range: float = 100; drift_rate: float = 0
-    icon: str; filename: str = ""; bacnet_port: int = 47808
-    bacnet_device_id: int = 1234; is_normally_open: int = 1
+    name: str
+    type: str
+    sub_type: str
+    protocol: str
+    address: int
+    min_range: float = 0
+    max_range: float = 100
+    drift_rate: float = 0
+    icon: str
+    filename: str = ""
+    bacnet_port: int = 47808
+    bacnet_device_id: int = 1234
+    is_normally_open: int = 1
 
 class BACnetManager:
     """Manages virtual BACnet devices with strict Read/Write constraints."""
@@ -39,7 +48,6 @@ class BACnetManager:
     def start_asset_stack(self, asset):
         if not BAC0 or asset['name'] in self.instances: return
         try:
-            # Acts as a virtual device for BMD discovery
             new_stack = BAC0.lite(port=asset['bacnet_port'], deviceId=asset['bacnet_device_id'])
             if asset['sub_type'] == "Digital":
                 obj = BAC0.core.devices.Device.ObjectFactory(
@@ -65,7 +73,6 @@ class BACnetManager:
                 self.objects[name].presentValue = float(val)
 
     def get_value(self, name):
-        """Read values. Writable only for Digital assets via SCADA."""
         if name in self.objects:
             obj = self.objects[name]
             if hasattr(obj, 'presentValue'):
@@ -86,11 +93,19 @@ async def get_assets():
     conn.close()
     return [dict(a) for a in assets]
 
+@app.get("/api/assets/{name}")
+async def get_asset(name: str):
+    conn = get_db_connection()
+    asset = conn.execute("SELECT * FROM assets WHERE name = ?", (name,)).fetchone()
+    conn.close()
+    if not asset:
+        raise HTTPException(status_code=404, detail="Asset not found")
+    return dict(asset)
+
 @app.post("/api/assets")
 async def add_asset(a: AssetIn):
     conn = get_db_connection()
     try:
-        # Digital starting state based on NO/NC logic
         initial_val = 0.0 if (a.sub_type == "Digital" and a.is_normally_open) else (1.0 if a.sub_type == "Digital" else (a.min_range + a.max_range) / 2)
         conn.execute('''
             INSERT INTO assets (name, type, sub_type, protocol, address, min_range, max_range, current_value, drift_rate, icon, filename, bacnet_port, bacnet_device_id, is_normally_open)
@@ -104,31 +119,6 @@ async def add_asset(a: AssetIn):
     finally: conn.close()
     return {"status": "ok"}
 
-@app.delete("/api/assets/{name}")
-async def delete_asset(name: str):
-    conn = get_db_connection()
-    conn.execute("DELETE FROM assets WHERE name = ?", (name,))
-    conn.commit()
-    conn.close()
-    return {"status": "removed"}
-
-@app.put("/api/override/{name}")
-async def override(name: str, value: float):
-    conn = get_db_connection()
-    # Use name in the WHERE clause
-    conn.execute("UPDATE assets SET current_value = ?, manual_override = 1 WHERE name = ?", (value, name))
-    conn.commit()
-    conn.close()
-    return {"status": "locked"}
-
-@app.put("/api/release/{name}")
-async def release(name: str):
-    conn = get_db_connection()
-    # Ensure the WHERE clause matches the 'name' string passed from the UI
-    conn.execute("UPDATE assets SET manual_override = 0 WHERE name = ?", (name,))
-    conn.commit()
-    conn.close()
-    return {"status": "auto"}
 @app.put("/api/assets/{name}")
 async def update_asset(name: str, a: AssetIn):
     conn = get_db_connection()
@@ -142,6 +132,31 @@ async def update_asset(name: str, a: AssetIn):
     conn.commit()
     conn.close()
     return {"status": "updated"}
+
+@app.delete("/api/assets/{name}")
+async def delete_asset(name: str):
+    conn = get_db_connection()
+    conn.execute("DELETE FROM assets WHERE name = ?", (name,))
+    conn.commit()
+    conn.close()
+    return {"status": "removed"}
+
+@app.put("/api/override/{name}")
+async def override(name: str, value: float):
+    conn = get_db_connection()
+    conn.execute("UPDATE assets SET current_value = ?, manual_override = 1 WHERE name = ?", (value, name))
+    conn.commit()
+    conn.close()
+    return {"status": "locked"}
+
+@app.put("/api/release/{name}")
+async def release(name: str):
+    conn = get_db_connection()
+    conn.execute("UPDATE assets SET manual_override = 0 WHERE name = ?", (name,))
+    conn.commit()
+    conn.close()
+    return {"status": "auto"}
+
 async def main_task():
     init_db()
     conn = get_db_connection()
