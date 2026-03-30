@@ -1,5 +1,7 @@
 let socket;
 let bbmdList = [];
+let shouldReconnectSocket = true;
+let reconnectTimer = null;
 
 function renderAlarms(alarms) {
     const alarmList = document.getElementById('alarmList');
@@ -32,7 +34,9 @@ function connectWebSocket() {
     };
 
     socket.onclose = function() {
-        setTimeout(connectWebSocket, 2000);
+        if (!shouldReconnectSocket) return;
+        if (reconnectTimer) clearTimeout(reconnectTimer);
+        reconnectTimer = setTimeout(connectWebSocket, 2000);
     };
 }
 
@@ -535,4 +539,15 @@ document.addEventListener('DOMContentLoaded', () => {
     setInterval(window.fetchAssets, 5000);
     setInterval(refreshAlarms, 5000);
     connectWebSocket();
+});
+
+window.addEventListener('beforeunload', () => {
+    shouldReconnectSocket = false;
+    if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+    }
+    if (socket && socket.readyState === WebSocket.OPEN) {
+        socket.close();
+    }
 });
