@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import time
-from contextlib import asynccontextmanager, suppress
-from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
@@ -13,7 +11,6 @@ from pydantic import BaseModel
 from uvicorn import Config, Server
 
 from database import get_db_connection, init_db
-from engine import simulation_loop
 
 try:
     import BAC0
@@ -91,10 +88,8 @@ class AssetIn(BaseModel):
     is_normally_open: int = 1
     change_probability: float = 0.0
     change_interval: int = 15
-    bbmd_id: Optional[int] = None
+    bbmd_id: int = None
     object_type: str = "value"
-    modbus_unit_id: Optional[int] = 1
-    modbus_register_type: Optional[str] = "holding"
 
 
 def _close_connection(conn) -> None:
@@ -228,7 +223,6 @@ class BACnetManager:
 
 
 bacnet_manager = BACnetManager()
-simulation_task: asyncio.Task | None = None
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -356,23 +350,6 @@ async def get_assets():
         _close_connection(conn)
 
 
-@app.get("/api/alarms")
-async def get_alarms(active_only: int = 1):
-    conn = get_db_connection()
-    try:
-        if active_only:
-            alarms = conn.execute(
-                "SELECT * FROM alarm_events WHERE active = 1 ORDER BY created_at DESC LIMIT 100"
-            ).fetchall()
-        else:
-            alarms = conn.execute(
-                "SELECT * FROM alarm_events ORDER BY created_at DESC LIMIT 200"
-            ).fetchall()
-        return [dict(a) for a in alarms]
-    finally:
-        _close_connection(conn)
-
-
 @app.get("/api/assets/{name}")
 async def get_asset(name: str):
     conn = get_db_connection()
@@ -389,13 +366,6 @@ async def get_asset(name: str):
 async def add_asset(asset: AssetIn):
     conn = get_db_connection()
     try:
-        is_bacnet = asset.protocol == BACNET_PROTOCOL
-        if is_bacnet and not asset.bbmd_id:
-            raise HTTPException(status_code=400, detail="BACnet assets require a BBMD assignment")
-
-        normalized_bbmd_id = asset.bbmd_id if is_bacnet else None
-        normalized_object_type = asset.object_type if is_bacnet else "value"
-
         initial_value = _initial_asset_value(asset)
         conn.execute(
             """
@@ -403,10 +373,9 @@ async def add_asset(asset: AssetIn):
                 name, type, sub_type, protocol, address, min_range, max_range,
                 current_value, drift_rate, icon, filename, bacnet_port,
                 bacnet_device_id, is_normally_open, change_probability,
-                change_interval, last_flip_check, bbmd_id, object_type,
-                modbus_unit_id, modbus_register_type, alarm_state
+                change_interval, last_flip_check, bbmd_id, object_type, alarm_state
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 asset.name,
@@ -426,17 +395,15 @@ async def add_asset(asset: AssetIn):
                 asset.change_probability,
                 asset.change_interval,
                 time.time(),
-                normalized_bbmd_id,
-                normalized_object_type,
-                asset.modbus_unit_id,
-                asset.modbus_register_type,
+                asset.bbmd_id,
+                asset.object_type,
                 0,
             ),
         )
         conn.commit()
 
         # Add to BBMD if protocol is BACnet
-        if is_bacnet and normalized_bbmd_id:
+        if asset.protocol == BACNET_PROTOCOL and asset.bbmd_id:
             asset_data = conn.execute("SELECT * FROM assets WHERE name = ?", (asset.name,)).fetchone()
             bacnet_manager.add_asset_to_bbmd(dict(asset_data))
 
@@ -452,21 +419,13 @@ async def add_asset(asset: AssetIn):
 async def update_asset(name: str, asset: AssetIn):
     conn = get_db_connection()
     try:
-        is_bacnet = asset.protocol == BACNET_PROTOCOL
-        if is_bacnet and not asset.bbmd_id:
-            raise HTTPException(status_code=400, detail="BACnet assets require a BBMD assignment")
-
-        normalized_bbmd_id = asset.bbmd_id if is_bacnet else None
-        normalized_object_type = asset.object_type if is_bacnet else "value"
-
         conn.execute(
             """
             UPDATE assets
             SET type = ?, sub_type = ?, protocol = ?, address = ?, min_range = ?,
                 max_range = ?, drift_rate = ?, icon = ?, filename = ?, bacnet_port = ?,
                 bacnet_device_id = ?, is_normally_open = ?, change_probability = ?,
-                change_interval = ?, bbmd_id = ?, object_type = ?, modbus_unit_id = ?,
-                modbus_register_type = ?
+                change_interval = ?, bbmd_id = ?, object_type = ?
             WHERE name = ?
             """,
             (
@@ -484,22 +443,18 @@ async def update_asset(name: str, asset: AssetIn):
                 asset.is_normally_open,
                 asset.change_probability,
                 asset.change_interval,
-                normalized_bbmd_id,
-                normalized_object_type,
-                asset.modbus_unit_id,
-                asset.modbus_register_type,
+                asset.bbmd_id,
+                asset.object_type,
                 name,
             ),
         )
         conn.commit()
 
         # Re-add to BACnet if needed
-        if is_bacnet and normalized_bbmd_id:
+        if asset.protocol == BACNET_PROTOCOL and asset.bbmd_id:
             bacnet_manager.remove_asset(name)
             asset_data = conn.execute("SELECT * FROM assets WHERE name = ?", (name,)).fetchone()
             bacnet_manager.add_asset_to_bbmd(dict(asset_data))
-        else:
-            bacnet_manager.remove_asset(name)
 
     finally:
         _close_connection(conn)
@@ -563,30 +518,10 @@ async def _start_bacnet_devices():
         _close_connection(conn)
 
 
-@asynccontextmanager
-async def app_lifespan(_app: FastAPI):
-    global simulation_task
+async def main_task():
     init_db()
     await _start_bacnet_devices()
-    simulation_task = asyncio.create_task(
-        simulation_loop(None, bacnet_manager, ws_manager)
-    )
-    try:
-        yield
-    finally:
-        if simulation_task:
-            simulation_task.cancel()
-            with suppress(asyncio.CancelledError):
-                await simulation_task
 
-        for bbmd_id in list(bacnet_manager.bbmd_instances.keys()):
-            bacnet_manager.stop_bbmd(bbmd_id)
-
-
-app.router.lifespan_context = app_lifespan
-
-
-async def main_task():
     config = Config(app=app, host=SERVER_HOST, port=SERVER_PORT)
     await Server(config).serve()
 
