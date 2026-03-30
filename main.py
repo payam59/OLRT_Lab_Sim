@@ -597,8 +597,12 @@ async def shutdown_event():
 
 
 async def main_task():
+    await start_runtime()
     config = Config(app=app, host=SERVER_HOST, port=SERVER_PORT)
-    await Server(config).serve()
+    try:
+        await Server(config).serve()
+    finally:
+        await stop_runtime()
 
 
 if __name__ == "__main__":

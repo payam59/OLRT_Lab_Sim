@@ -500,6 +500,7 @@ document.addEventListener('DOMContentLoaded', () => {
     window.fetchBBMDs();
     window.fetchAssets();
     refreshAlarms();
+    setInterval(window.fetchAssets, 5000);
     setInterval(refreshAlarms, 5000);
     connectWebSocket();
 });
