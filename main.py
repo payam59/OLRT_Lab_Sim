@@ -5,6 +5,7 @@ import time
 from contextlib import asynccontextmanager, suppress
 from typing import Optional
 
+from BAC0.core.devices.local.factory import ObjectFactory
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
