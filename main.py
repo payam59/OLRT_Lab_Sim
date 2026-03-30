@@ -14,20 +14,8 @@ from uvicorn import Config, Server
 
 from database import get_db_connection, init_db
 from engine import simulation_loop
+from bacnet_runtime import BAC0, BAC0_IMPORT_ERROR, BACnetManager
 from modbus_runtime import ModbusRuntimeManager
-
-BAC0_IMPORT_ERROR = None
-try:
-    import BAC0
-    from bacpypes3.local.analog import AnalogInputObject, AnalogOutputObject, AnalogValueObject
-    from bacpypes3.local.binary import BinaryInputObject, BinaryOutputObject, BinaryValueObject
-    from BAC0.core.devices.local.factory import ObjectFactory
-except Exception as e:
-    BAC0 = None
-    BAC0_IMPORT_ERROR = str(e)
-    AnalogInputObject = AnalogOutputObject = AnalogValueObject = None
-    BinaryInputObject = BinaryOutputObject = BinaryValueObject = None
-    ObjectFactory = None
 
 APP_TITLE = "OLRT Lab Simulation Core"
 STATIC_DIR = "static"
@@ -119,7 +107,7 @@ def _initial_asset_value(asset: AssetIn) -> float:
     return (asset.min_range + asset.max_range) / 2
 
 
-class BACnetManager:
+class LegacyBACnetManager:
     """Manages BBMD devices and their associated BACnet objects"""
     def __init__(self):
         self.bbmd_instances = {}  # {bbmd_id: BAC0_instance}
@@ -225,6 +213,7 @@ class BACnetManager:
                     instance=asset["address"],
                     objectName=asset["name"],
                     presentValue=present_val,
+                    properties={},
                 )
             else:
                 factory = ObjectFactory(

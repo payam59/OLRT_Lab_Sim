@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from collections import defaultdict
+import inspect
 
 try:
     from pymodbus.datastore import ModbusSequentialDataBlock, ModbusServerContext
@@ -48,6 +49,10 @@ class ModbusRuntimeManager:
             slave = ModbusSlaveContext(**blocks)
         else:
             slave = ModbusDeviceContext(**blocks)
+
+        server_params = inspect.signature(ModbusServerContext.__init__).parameters
+        if "devices" in server_params:
+            return ModbusServerContext(devices=slave, single=True)
         return ModbusServerContext(slaves=slave, single=True)
 
     async def ensure_endpoint(self, ip: str, port: int):
