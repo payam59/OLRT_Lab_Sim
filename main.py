@@ -95,6 +95,8 @@ class AssetIn(BaseModel):
     modbus_register_type: Optional[str] = "holding"
     modbus_ip: str = "0.0.0.0"
     modbus_port: int = 5020
+    modbus_alarm_address: Optional[int] = None
+    modbus_alarm_bit: Optional[int] = 0
 
 
 def _close_connection(conn) -> None:
@@ -487,9 +489,10 @@ async def add_asset(asset: AssetIn):
                 current_value, drift_rate, icon, filename, bacnet_port,
                 bacnet_device_id, is_normally_open, change_probability,
                 change_interval, last_flip_check, bbmd_id, object_type, bacnet_properties,
-                modbus_unit_id, modbus_register_type, modbus_ip, modbus_port, alarm_state
+                modbus_unit_id, modbus_register_type, modbus_ip, modbus_port,
+                modbus_alarm_address, modbus_alarm_bit, alarm_state
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 cleaned_name,
@@ -516,6 +519,8 @@ async def add_asset(asset: AssetIn):
                 asset.modbus_register_type,
                 asset.modbus_ip,
                 asset.modbus_port,
+                asset.modbus_alarm_address,
+                asset.modbus_alarm_bit or 0,
                 0,
             ),
         )
@@ -555,7 +560,8 @@ async def update_asset(name: str, asset: AssetIn):
                 max_range = ?, drift_rate = ?, icon = ?, filename = ?, bacnet_port = ?,
                 bacnet_device_id = ?, is_normally_open = ?, change_probability = ?,
                 change_interval = ?, bbmd_id = ?, object_type = ?, modbus_unit_id = ?,
-                bacnet_properties = ?, modbus_register_type = ?, modbus_ip = ?, modbus_port = ?
+                bacnet_properties = ?, modbus_register_type = ?, modbus_ip = ?, modbus_port = ?,
+                modbus_alarm_address = ?, modbus_alarm_bit = ?
             WHERE name = ?
             """,
             (
@@ -580,6 +586,8 @@ async def update_asset(name: str, asset: AssetIn):
                 asset.modbus_register_type,
                 asset.modbus_ip,
                 asset.modbus_port,
+                asset.modbus_alarm_address,
+                asset.modbus_alarm_bit or 0,
                 name,
             ),
         )

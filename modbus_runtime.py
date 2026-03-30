@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from collections import defaultdict
 import inspect
+import struct
 
 try:
     from pymodbus.datastore import ModbusSequentialDataBlock, ModbusServerContext
@@ -82,6 +83,8 @@ class ModbusRuntimeManager:
             "unit_id": int(asset.get("modbus_unit_id") or 1),
             "register_type": asset.get("modbus_register_type") or "holding",
             "address": int(asset.get("address") or 0),
+            "alarm_address": asset.get("modbus_alarm_address"),
+            "alarm_bit": int(asset.get("modbus_alarm_bit") or 0),
             "sub_type": asset.get("sub_type"),
         }
         self.endpoint_assets[endpoint].add(name)
@@ -125,9 +128,39 @@ class ModbusRuntimeManager:
         value = asset.get("current_value", 0)
         if register_type in ("coil", "discrete"):
             value = 1 if float(value) >= 0.5 else 0
+            context[0x00].setValues(self._set_for_type(register_type), addr, [value])
         else:
-            value = int(round(float(value)))
-        context[0x00].setValues(self._set_for_type(register_type), addr, [value])
+            # Preserve analog precision by storing IEEE-754 float32 across two registers.
+            packed = struct.pack(">f", float(value))
+            reg_hi, reg_lo = struct.unpack(">HH", packed)
+            context[0x00].setValues(self._set_for_type(register_type), addr, [reg_hi, reg_lo])
+
+        self._write_alarm_point(context, mapping, asset)
+
+    def _write_alarm_point(self, context, mapping: dict, asset: dict):
+        alarm_addr_raw = mapping.get("alarm_address")
+        if alarm_addr_raw is None:
+            return
+        try:
+            alarm_addr = int(alarm_addr_raw)
+        except (TypeError, ValueError):
+            return
+        bit = mapping.get("alarm_bit", 0)
+        try:
+            bit = max(0, min(int(bit), 15))
+        except (TypeError, ValueError):
+            bit = 0
+        alarm_active = 1 if int(asset.get("alarm_state") or 0) else 0
+        if mapping["register_type"] in ("coil", "discrete"):
+            context[0x00].setValues(1, alarm_addr, [alarm_active])
+            return
+        existing = context[0x00].getValues(3, alarm_addr, count=1)
+        word = int(existing[0]) if existing else 0
+        if alarm_active:
+            word |= (1 << bit)
+        else:
+            word &= ~(1 << bit)
+        context[0x00].setValues(3, alarm_addr, [word])
 
     def read_remote_value(self, asset: dict):
         if not self.installed:
@@ -141,10 +174,16 @@ class ModbusRuntimeManager:
             return None
         addr = mapping["address"]
         register_type = mapping["register_type"]
-        values = context[0x00].getValues(self._fc_for_type(register_type), addr, count=1)
+        count = 1 if register_type in ("coil", "discrete") else 2
+        values = context[0x00].getValues(self._fc_for_type(register_type), addr, count=count)
         if not values:
             return None
-        return float(values[0])
+        if register_type in ("coil", "discrete"):
+            return float(values[0])
+        if len(values) < 2:
+            return None
+        packed = struct.pack(">HH", int(values[0]), int(values[1]))
+        return float(struct.unpack(">f", packed)[0])
 
     async def bootstrap(self, assets: list[dict]):
         if not self.installed:
