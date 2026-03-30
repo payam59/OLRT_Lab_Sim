@@ -461,9 +461,20 @@ async def get_asset(name: str):
 async def add_asset(asset: AssetIn):
     conn = get_db_connection()
     try:
+        cleaned_name = (asset.name or "").strip()
+        if not cleaned_name:
+            raise HTTPException(status_code=400, detail="Asset name is required")
+
+        existing = conn.execute("SELECT 1 FROM assets WHERE name = ?", (cleaned_name,)).fetchone()
+        if existing:
+            raise HTTPException(status_code=409, detail=f"Asset name '{cleaned_name}' already exists")
+
         is_bacnet = asset.protocol == BACNET_PROTOCOL
         if is_bacnet and not asset.bbmd_id:
             raise HTTPException(status_code=400, detail="BACnet assets require a BBMD assignment")
+
+        if asset.protocol == "modbus" and not (asset.modbus_ip or "").strip():
+            raise HTTPException(status_code=400, detail="Modbus IP is required for Modbus assets")
 
         normalized_bbmd_id = asset.bbmd_id if is_bacnet else None
         normalized_object_type = asset.object_type if is_bacnet else "value"
@@ -481,7 +492,7 @@ async def add_asset(asset: AssetIn):
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                asset.name,
+                cleaned_name,
                 asset.type,
                 asset.sub_type,
                 asset.protocol,

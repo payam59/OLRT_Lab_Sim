@@ -294,6 +294,12 @@ window.saveNewAsset = async function() {
     const protocol = document.getElementById('protocol').value;
     const isBacnet = protocol === 'bacnet';
     const bbmdValue = document.getElementById('bbmd_select').value;
+    const assetName = (document.getElementById('name').value || '').trim();
+
+    if (!assetName) {
+        alert('Asset Name is required.');
+        return;
+    }
 
     // Get address and icon based on protocol
     const address = isBacnet ?
@@ -304,7 +310,7 @@ window.saveNewAsset = async function() {
         document.getElementById('modbus_icon').value;
 
     const data = {
-        name: document.getElementById('name').value,
+        name: assetName,
         type: document.getElementById('type').value,
         sub_type: document.getElementById('sub_type').value,
         protocol: protocol,
@@ -329,6 +335,10 @@ window.saveNewAsset = async function() {
 
     if (isBacnet && !data.bbmd_id) {
         alert('BACnet assets must be mapped to a BBMD.');
+        return;
+    }
+    if (!isBacnet && !data.modbus_ip) {
+        alert('Modbus IP is required for Modbus assets.');
         return;
     }
 
