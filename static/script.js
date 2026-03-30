@@ -98,7 +98,8 @@ function renderAssets(assets) {
         const bbmdBadge = a.bbmd_id ? `<span class="badge bg-success">BBMD #${a.bbmd_id}</span>` : '';
         const objectTypeBadge = `<span class="badge bg-info">${a.object_type || 'value'}</span>`;
         const modbusBadge = a.protocol === 'modbus'
-            ? `<div class="small text-muted">Unit ${a.modbus_unit_id || 1} • ${a.modbus_register_type || 'holding'} @ ${a.address}</div>`
+            ? `<div class="small text-muted">Unit ${a.modbus_unit_id || 1} • ${a.modbus_register_type || 'holding'} @ ${a.address}</div>
+               <div class="small text-muted">TCP ${a.modbus_ip || '0.0.0.0'}:${a.modbus_port || 5020}</div>`
             : '';
         const bacnetBadge = a.protocol === 'bacnet'
             ? `<div class="small text-muted">BACnet instance ${a.address}${a.bbmd_id ? ` • BBMD ${a.bbmd_id}` : ''}</div>`
@@ -158,6 +159,22 @@ window.fetchAssets = async function() {
     const assets = await response.json();
     renderAssets(assets);
     window.fetchAlarms();
+};
+
+window.showBacnetStatus = async function() {
+    const response = await fetch('/api/bacnet/status');
+    if (!response.ok) {
+        alert('Failed to fetch BACnet service status.');
+        return;
+    }
+    const status = await response.json();
+    const summary = [
+        `BAC0 Installed: ${status.bac0_installed ? 'Yes' : 'No'}`,
+        `Running BBMD IDs: ${(status.running_bbmd_ids || []).join(', ') || 'None'}`,
+        `Registered Objects: ${(status.registered_object_names || []).join(', ') || 'None'}`,
+        `BBMD Status: ${JSON.stringify(status.bbmd_status || {})}`
+    ].join('\n');
+    alert(summary);
 };
 
 window.fetchAlarms = async function() {
@@ -320,7 +337,9 @@ window.saveNewAsset = async function() {
         bbmd_id: isBacnet && bbmdValue ? parseInt(bbmdValue) : null,
         object_type: isBacnet ? document.getElementById('object_type').value : 'value',
         modbus_unit_id: parseInt(document.getElementById('modbus_unit_id').value) || 1,
-        modbus_register_type: document.getElementById('modbus_register_type').value || 'holding'
+        modbus_register_type: document.getElementById('modbus_register_type').value || 'holding',
+        modbus_ip: document.getElementById('modbus_ip').value || '0.0.0.0',
+        modbus_port: parseInt(document.getElementById('modbus_port').value) || 5020
     };
 
     if (isBacnet && !data.bbmd_id) {
@@ -366,6 +385,8 @@ window.openEditModal = async function(name) {
         document.getElementById('edit_modbus_icon').value = a.icon;
         document.getElementById('edit_modbus_unit_id').value = a.modbus_unit_id || 1;
         document.getElementById('edit_modbus_register_type').value = a.modbus_register_type || 'holding';
+        document.getElementById('edit_modbus_ip').value = a.modbus_ip || '0.0.0.0';
+        document.getElementById('edit_modbus_port').value = a.modbus_port || 5020;
     }
 
     window.toggleFields('edit_');
@@ -405,7 +426,9 @@ window.saveAssetEdit = async function() {
         bbmd_id: isBacnet && bbmdValue ? parseInt(bbmdValue) : null,
         object_type: isBacnet ? document.getElementById('edit_object_type').value : 'value',
         modbus_unit_id: parseInt(document.getElementById('edit_modbus_unit_id').value) || 1,
-        modbus_register_type: document.getElementById('edit_modbus_register_type').value || 'holding'
+        modbus_register_type: document.getElementById('edit_modbus_register_type').value || 'holding',
+        modbus_ip: document.getElementById('edit_modbus_ip').value || '0.0.0.0',
+        modbus_port: parseInt(document.getElementById('edit_modbus_port').value) || 5020
     };
 
     if (isBacnet && !data.bbmd_id) {

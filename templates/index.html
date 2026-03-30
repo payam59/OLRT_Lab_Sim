@@ -13,6 +13,9 @@
         <div class="d-flex justify-content-between align-items-center mb-5">
             <h2 class="fw-bold"><i class="fas fa-network-wired me-2"></i>Asset Control Center</h2>
             <div class="d-flex gap-2">
+                <button class="btn btn-outline-info shadow-sm px-3" onclick="showBacnetStatus()">
+                    <i class="fas fa-heartbeat me-2"></i>BACnet Service Status
+                </button>
                 <button class="btn btn-success shadow-sm px-4" data-bs-toggle="modal" data-bs-target="#bbmdModal">
                     <i class="fas fa-server me-2"></i>Manage BBMD
                 </button>
@@ -203,6 +206,16 @@
                         </div>
                         <div class="row mb-2">
                             <div class="col">
+                                <label class="small fw-bold">Modbus IP</label>
+                                <input type="text" id="modbus_ip" class="form-control" value="0.0.0.0">
+                            </div>
+                            <div class="col">
+                                <label class="small fw-bold">Modbus Port</label>
+                                <input type="number" id="modbus_port" class="form-control" value="5020">
+                            </div>
+                        </div>
+                        <div class="row mb-2">
+                            <div class="col">
                                 <label class="small fw-bold">Unit ID</label>
                                 <input type="number" id="modbus_unit_id" class="form-control" value="1">
                             </div>
@@ -321,6 +334,16 @@
                                     <option value="fa-gauge">Pressure</option>
                                     <option value="fa-droplet">Humidity</option>
                                 </select>
+                            </div>
+                        </div>
+                        <div class="row mb-2">
+                            <div class="col">
+                                <label class="small fw-bold">Modbus IP</label>
+                                <input type="text" id="edit_modbus_ip" class="form-control">
+                            </div>
+                            <div class="col">
+                                <label class="small fw-bold">Modbus Port</label>
+                                <input type="number" id="edit_modbus_port" class="form-control">
                             </div>
                         </div>
                         <div class="row mb-2">

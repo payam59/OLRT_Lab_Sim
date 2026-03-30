@@ -95,6 +95,8 @@ class AssetIn(BaseModel):
     object_type: str = "value"
     modbus_unit_id: Optional[int] = 1
     modbus_register_type: Optional[str] = "holding"
+    modbus_ip: str = "0.0.0.0"
+    modbus_port: int = 5020
 
 
 def _close_connection(conn) -> None:
@@ -434,9 +436,9 @@ async def add_asset(asset: AssetIn):
                 current_value, drift_rate, icon, filename, bacnet_port,
                 bacnet_device_id, is_normally_open, change_probability,
                 change_interval, last_flip_check, bbmd_id, object_type,
-                modbus_unit_id, modbus_register_type, alarm_state
+                modbus_unit_id, modbus_register_type, modbus_ip, modbus_port, alarm_state
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 asset.name,
@@ -460,6 +462,8 @@ async def add_asset(asset: AssetIn):
                 normalized_object_type,
                 asset.modbus_unit_id,
                 asset.modbus_register_type,
+                asset.modbus_ip,
+                asset.modbus_port,
                 0,
             ),
         )
@@ -496,7 +500,7 @@ async def update_asset(name: str, asset: AssetIn):
                 max_range = ?, drift_rate = ?, icon = ?, filename = ?, bacnet_port = ?,
                 bacnet_device_id = ?, is_normally_open = ?, change_probability = ?,
                 change_interval = ?, bbmd_id = ?, object_type = ?, modbus_unit_id = ?,
-                modbus_register_type = ?
+                modbus_register_type = ?, modbus_ip = ?, modbus_port = ?
             WHERE name = ?
             """,
             (
@@ -518,6 +522,8 @@ async def update_asset(name: str, asset: AssetIn):
                 normalized_object_type,
                 asset.modbus_unit_id,
                 asset.modbus_register_type,
+                asset.modbus_ip,
+                asset.modbus_port,
                 name,
             ),
         )
