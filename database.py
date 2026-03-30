@@ -1,5 +1,6 @@
 import sqlite3
 import os
+import time
 
 DB_FILE = "lab_assets.db"
 LOG_DIR = "simulation_logs"
@@ -8,6 +9,21 @@ def init_db():
     if not os.path.exists(LOG_DIR): os.makedirs(LOG_DIR)
     conn = sqlite3.connect(DB_FILE)
 
+    # Create BBMD table
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS bbmd (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT UNIQUE NOT NULL,
+            description TEXT,
+            port INTEGER UNIQUE NOT NULL,
+            device_id INTEGER NOT NULL,
+            ip_address TEXT DEFAULT '0.0.0.0',
+            enabled INTEGER DEFAULT 1,
+            created_at REAL DEFAULT 0.0
+        )
+    ''')
+
+    # Create assets table with BBMD relationship
     conn.execute('''
         CREATE TABLE IF NOT EXISTS assets (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -25,10 +41,19 @@ def init_db():
             filename TEXT,
             bacnet_port INTEGER DEFAULT 47808,
             bacnet_device_id INTEGER DEFAULT 1234,
-            is_normally_open INTEGER DEFAULT 1
+            is_normally_open INTEGER DEFAULT 1,
+            change_probability REAL DEFAULT 0.0,
+            change_interval INTEGER DEFAULT 15,
+            last_flip_check REAL DEFAULT 0.0,
+            bbmd_id INTEGER,
+            object_type TEXT DEFAULT 'value',
+            alarm_state INTEGER DEFAULT 0,
+            alarm_message TEXT,
+            FOREIGN KEY (bbmd_id) REFERENCES bbmd(id) ON DELETE SET NULL
         )
     ''')
 
+    # Migrations for assets table
     cursor = conn.execute("PRAGMA table_info(assets)")
     columns = [column[1] for column in cursor.fetchall()]
 
@@ -37,7 +62,14 @@ def init_db():
         'is_normally_open': 'INTEGER DEFAULT 1',
         'bacnet_port': 'INTEGER DEFAULT 47808',
         'bacnet_device_id': 'INTEGER DEFAULT 1234',
-        'filename': 'TEXT'
+        'filename': 'TEXT',
+        'change_probability': 'REAL DEFAULT 0.0',
+        'change_interval': 'INTEGER DEFAULT 15',
+        'last_flip_check': 'REAL DEFAULT 0.0',
+        'bbmd_id': 'INTEGER',
+        'object_type': 'TEXT DEFAULT "value"',
+        'alarm_state': 'INTEGER DEFAULT 0',
+        'alarm_message': 'TEXT'
     }
 
     for col, col_def in migrations.items():
