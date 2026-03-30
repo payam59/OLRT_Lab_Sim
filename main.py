@@ -114,6 +114,7 @@ class BACnetManager:
         self.bbmd_instances = {}  # {bbmd_id: BAC0_instance}
         self.objects = {}  # {asset_name: BACnet_object}
         self.asset_to_bbmd = {}  # {asset_name: bbmd_id}
+        self.bbmd_status = {}  # {bbmd_id: {running: bool, message: str}}
 
     def _get_object_class(self, sub_type, object_type):
         """Returns the appropriate BACnet object class based on sub_type and object_type"""
@@ -134,18 +135,36 @@ class BACnetManager:
 
     def start_bbmd(self, bbmd):
         """Start a BBMD device"""
-        if not BAC0 or bbmd["id"] in self.bbmd_instances:
+        bbmd_id = bbmd["id"]
+        if bbmd_id in self.bbmd_instances:
+            return
+        if not BAC0:
+            self.bbmd_status[bbmd_id] = {
+                "running": False,
+                "message": "BAC0 is not installed in the runtime environment.",
+            }
+            print(f"[BACnet] Cannot start BBMD '{bbmd['name']}': BAC0 not installed.")
             return
 
         try:
-            new_stack = BAC0.lite(
-                ip=bbmd["ip_address"],
+            lite_args = dict(
                 port=bbmd["port"],
-                deviceId=bbmd["device_id"]
+                deviceId=bbmd["device_id"],
+                localObjName=bbmd["name"],
             )
-            self.bbmd_instances[bbmd["id"]] = new_stack
+            ip_address = (bbmd.get("ip_address") or "").strip()
+            if ip_address and ip_address != "0.0.0.0":
+                lite_args["ip"] = ip_address
+
+            new_stack = BAC0.lite(**lite_args)
+            self.bbmd_instances[bbmd_id] = new_stack
+            self.bbmd_status[bbmd_id] = {
+                "running": True,
+                "message": f"Listening on UDP {ip_address or 'auto-detected'}:{bbmd['port']}",
+            }
             print(f"[BACnet] Started BBMD '{bbmd['name']}' on port {bbmd['port']} with device ID {bbmd['device_id']}")
         except Exception as e:
+            self.bbmd_status[bbmd_id] = {"running": False, "message": str(e)}
             print(f"[BACnet] Failed to start BBMD {bbmd['name']}: {e}")
 
     def stop_bbmd(self, bbmd_id):
@@ -154,6 +173,7 @@ class BACnetManager:
             try:
                 self.bbmd_instances[bbmd_id].disconnect()
                 del self.bbmd_instances[bbmd_id]
+                self.bbmd_status[bbmd_id] = {"running": False, "message": "Stopped"}
                 print(f"[BACnet] Stopped BBMD {bbmd_id}")
             except Exception as e:
                 print(f"[BACnet] Error stopping BBMD {bbmd_id}: {e}")
@@ -371,6 +391,16 @@ async def get_alarms(active_only: int = 1):
         return [dict(a) for a in alarms]
     finally:
         _close_connection(conn)
+
+
+@app.get("/api/bacnet/status")
+async def get_bacnet_status():
+    return {
+        "bac0_installed": BAC0 is not None,
+        "running_bbmd_ids": list(bacnet_manager.bbmd_instances.keys()),
+        "bbmd_status": bacnet_manager.bbmd_status,
+        "registered_object_names": list(bacnet_manager.objects.keys()),
+    }
 
 
 @app.get("/api/assets/{name}")
