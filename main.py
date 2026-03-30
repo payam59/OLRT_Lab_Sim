@@ -90,6 +90,7 @@ class AssetIn(BaseModel):
     change_interval: int = 15
     bbmd_id: Optional[int] = None
     object_type: str = "value"
+    bacnet_properties: str = "{}"
     modbus_unit_id: Optional[int] = 1
     modbus_register_type: Optional[str] = "holding"
     modbus_ip: str = "0.0.0.0"
@@ -474,10 +475,10 @@ async def add_asset(asset: AssetIn):
                 name, type, sub_type, protocol, address, min_range, max_range,
                 current_value, drift_rate, icon, filename, bacnet_port,
                 bacnet_device_id, is_normally_open, change_probability,
-                change_interval, last_flip_check, bbmd_id, object_type,
+                change_interval, last_flip_check, bbmd_id, object_type, bacnet_properties,
                 modbus_unit_id, modbus_register_type, modbus_ip, modbus_port, alarm_state
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 asset.name,
@@ -499,6 +500,7 @@ async def add_asset(asset: AssetIn):
                 time.time(),
                 normalized_bbmd_id,
                 normalized_object_type,
+                asset.bacnet_properties,
                 asset.modbus_unit_id,
                 asset.modbus_register_type,
                 asset.modbus_ip,
@@ -542,7 +544,7 @@ async def update_asset(name: str, asset: AssetIn):
                 max_range = ?, drift_rate = ?, icon = ?, filename = ?, bacnet_port = ?,
                 bacnet_device_id = ?, is_normally_open = ?, change_probability = ?,
                 change_interval = ?, bbmd_id = ?, object_type = ?, modbus_unit_id = ?,
-                modbus_register_type = ?, modbus_ip = ?, modbus_port = ?
+                bacnet_properties = ?, modbus_register_type = ?, modbus_ip = ?, modbus_port = ?
             WHERE name = ?
             """,
             (
@@ -563,6 +565,7 @@ async def update_asset(name: str, asset: AssetIn):
                 normalized_bbmd_id,
                 normalized_object_type,
                 asset.modbus_unit_id,
+                asset.bacnet_properties,
                 asset.modbus_register_type,
                 asset.modbus_ip,
                 asset.modbus_port,

@@ -320,6 +320,7 @@ window.saveNewAsset = async function() {
         change_interval: parseInt(document.getElementById('interval').value) || 15,
         bbmd_id: isBacnet && bbmdValue ? parseInt(bbmdValue) : null,
         object_type: isBacnet ? document.getElementById('object_type').value : 'value',
+        bacnet_properties: isBacnet ? (document.getElementById('bacnet_properties').value || '{}') : '{}',
         modbus_unit_id: parseInt(document.getElementById('modbus_unit_id').value) || 1,
         modbus_register_type: document.getElementById('modbus_register_type').value || 'holding',
         modbus_ip: document.getElementById('modbus_ip').value || '0.0.0.0',
@@ -358,6 +359,7 @@ window.openEditModal = async function(name) {
     document.getElementById('edit_bac_id').value = a.bacnet_device_id;
     document.getElementById('edit_object_type').value = a.object_type || 'value';
     document.getElementById('edit_bbmd_select').value = a.bbmd_id || '';
+    document.getElementById('edit_bacnet_properties').value = a.bacnet_properties || '{}';
 
     // Set address and icon based on protocol
     const isBacnet = a.protocol === 'bacnet';
@@ -409,6 +411,7 @@ window.saveAssetEdit = async function() {
         change_interval: parseInt(document.getElementById('edit_interval').value) || 15,
         bbmd_id: isBacnet && bbmdValue ? parseInt(bbmdValue) : null,
         object_type: isBacnet ? document.getElementById('edit_object_type').value : 'value',
+        bacnet_properties: isBacnet ? (document.getElementById('edit_bacnet_properties').value || '{}') : '{}',
         modbus_unit_id: parseInt(document.getElementById('edit_modbus_unit_id').value) || 1,
         modbus_register_type: document.getElementById('edit_modbus_register_type').value || 'holding',
         modbus_ip: document.getElementById('edit_modbus_ip').value || '0.0.0.0',

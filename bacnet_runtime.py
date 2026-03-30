@@ -1,4 +1,5 @@
 from __future__ import annotations
+import json
 
 BAC0_IMPORT_ERROR = None
 try:
@@ -76,14 +77,17 @@ class BACnetManager:
 
         if asset["sub_type"] == "Digital":
             present_val = "active" if asset["current_value"] >= 0.5 else "inactive"
-            factory = ObjectFactory(obj_class, instance=asset["address"], objectName=asset["name"], presentValue=present_val, properties={})
+            properties = self._parse_properties(asset.get("bacnet_properties"))
+            factory = ObjectFactory(obj_class, instance=asset["address"], objectName=asset["name"], presentValue=present_val, properties=properties)
         else:
+            properties = self._parse_properties(asset.get("bacnet_properties"))
+            properties.setdefault("units", "noUnits")
             factory = ObjectFactory(
                 obj_class,
                 instance=asset["address"],
                 objectName=asset["name"],
                 presentValue=float(asset["current_value"]),
-                properties={"units": "noUnits"},
+                properties=properties,
             )
         factory.add_objects_to_application(stack)
         obj = factory.objects.get(asset["name"])
@@ -111,3 +115,17 @@ class BACnetManager:
     def remove_asset(self, name):
         self.objects.pop(name, None)
         self.asset_to_bbmd.pop(name, None)
+
+    def _parse_properties(self, raw):
+        if not raw:
+            return {}
+        if isinstance(raw, dict):
+            return raw
+        if isinstance(raw, str):
+            try:
+                parsed = json.loads(raw)
+                if isinstance(parsed, dict):
+                    return parsed
+            except Exception:
+                return {}
+        return {}

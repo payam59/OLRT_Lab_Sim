@@ -155,6 +155,8 @@
                             <div class="col"><label class="small">Change Prob (%)</label><input type="number" id="prob" class="form-control" value="10"></div>
                             <div class="col"><label class="small">Check Interval (min)</label><input type="number" id="interval" class="form-control" value="15"></div>
                         </div>
+                        <label class="small fw-bold">BACnet Extra Properties (JSON)</label>
+                        <textarea id="bacnet_properties" class="form-control mb-2" rows="2" placeholder='{"units":"noUnits"}'>{}</textarea>
                     </div>
 
                     <div id="bacnet_config_section" class="border-top pt-3 mt-3">
@@ -183,6 +185,8 @@
                                 </select>
                             </div>
                         </div>
+                        <label class="small fw-bold">BACnet Extra Properties (JSON)</label>
+                        <textarea id="edit_bacnet_properties" class="form-control mb-2" rows="2" placeholder='{"units":"noUnits"}'>{}</textarea>
                     </div>
 
                     <div id="modbus_config_section" class="border-top pt-3 mt-3" style="display:none;">
