@@ -47,9 +47,24 @@ def init_db():
             last_flip_check REAL DEFAULT 0.0,
             bbmd_id INTEGER,
             object_type TEXT DEFAULT 'value',
+            modbus_unit_id INTEGER DEFAULT 1,
+            modbus_register_type TEXT DEFAULT 'holding',
             alarm_state INTEGER DEFAULT 0,
             alarm_message TEXT,
             FOREIGN KEY (bbmd_id) REFERENCES bbmd(id) ON DELETE SET NULL
+        )
+    ''')
+
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS alarm_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            asset_id INTEGER NOT NULL,
+            asset_name TEXT NOT NULL,
+            message TEXT NOT NULL,
+            active INTEGER DEFAULT 1,
+            created_at REAL NOT NULL,
+            cleared_at REAL,
+            FOREIGN KEY (asset_id) REFERENCES assets(id) ON DELETE CASCADE
         )
     ''')
 
@@ -68,6 +83,8 @@ def init_db():
         'last_flip_check': 'REAL DEFAULT 0.0',
         'bbmd_id': 'INTEGER',
         'object_type': 'TEXT DEFAULT "value"',
+        'modbus_unit_id': 'INTEGER DEFAULT 1',
+        'modbus_register_type': 'TEXT DEFAULT "holding"',
         'alarm_state': 'INTEGER DEFAULT 0',
         'alarm_message': 'TEXT'
     }

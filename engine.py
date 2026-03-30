@@ -83,6 +83,23 @@ async def simulation_loop(modbus_block, bacnet_manager, ws_manager=None):
                                    (1 if in_alarm else 0, alarm_msg if in_alarm else None, asset_dict['id']))
                     asset_dict['alarm_state'] = 1 if in_alarm else 0
                     asset_dict['alarm_message'] = alarm_msg if in_alarm else None
+                    if in_alarm:
+                        cursor.execute(
+                            """
+                            INSERT INTO alarm_events (asset_id, asset_name, message, active, created_at)
+                            VALUES (?, ?, ?, 1, ?)
+                            """,
+                            (asset_dict['id'], asset_dict['name'], alarm_msg, now)
+                        )
+                    else:
+                        cursor.execute(
+                            """
+                            UPDATE alarm_events
+                            SET active = 0, cleared_at = ?
+                            WHERE asset_id = ? AND active = 1
+                            """,
+                            (now, asset_dict['id'])
+                        )
                     alarm_changed = True
                     asset_changed = True
 
