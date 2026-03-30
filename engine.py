@@ -38,24 +38,25 @@ async def simulation_loop(modbus_block, bacnet_manager, ws_manager=None):
                 asset_changed = False
                 alarm_changed = False
 
-                # 1. BACnet SCADA Write Detection (for writable objects)
-                if asset_dict['protocol'] == "bacnet" and asset_dict.get('object_type') in ['output', 'value']:
-                    remote_val = bacnet_manager.get_value(asset_dict['name'])
-                    if remote_val is not None and abs(remote_val - original_value) > 0.01:
-                        cursor.execute("UPDATE assets SET current_value = ?, manual_override = 1 WHERE id = ?",
-                                       (remote_val, asset_dict['id']))
-                        asset_dict['current_value'] = remote_val
-                        asset_dict['manual_override'] = 1
-                        asset_changed = True
-                elif asset_dict['protocol'] == "modbus" and modbus_block:
-                    if asset_dict.get('modbus_register_type') in ['holding', 'coil']:
-                        remote_val = modbus_block.read_remote_value(asset_dict)
+                # 1. BACnet/Modbus remote write detection (only when asset is in auto mode)
+                if not asset_dict['manual_override']:
+                    if asset_dict['protocol'] == "bacnet" and asset_dict.get('object_type') in ['output', 'value']:
+                        remote_val = bacnet_manager.get_value(asset_dict['name'])
                         if remote_val is not None and abs(remote_val - original_value) > 0.01:
                             cursor.execute("UPDATE assets SET current_value = ?, manual_override = 1 WHERE id = ?",
                                            (remote_val, asset_dict['id']))
                             asset_dict['current_value'] = remote_val
                             asset_dict['manual_override'] = 1
                             asset_changed = True
+                    elif asset_dict['protocol'] == "modbus" and modbus_block:
+                        if asset_dict.get('modbus_register_type') in ['holding', 'coil']:
+                            remote_val = modbus_block.read_remote_value(asset_dict)
+                            if remote_val is not None and abs(remote_val - original_value) > 0.01:
+                                cursor.execute("UPDATE assets SET current_value = ?, manual_override = 1 WHERE id = ?",
+                                               (remote_val, asset_dict['id']))
+                                asset_dict['current_value'] = remote_val
+                                asset_dict['manual_override'] = 1
+                                asset_changed = True
 
                 # 2. Automation Logic (only if not manually overridden)
                 if not asset_dict['manual_override']:
