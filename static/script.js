@@ -161,22 +161,6 @@ window.fetchAssets = async function() {
     window.fetchAlarms();
 };
 
-window.showBacnetStatus = async function() {
-    const response = await fetch('/api/bacnet/status');
-    if (!response.ok) {
-        alert('Failed to fetch BACnet service status.');
-        return;
-    }
-    const status = await response.json();
-    const summary = [
-        `BAC0 Installed: ${status.bac0_installed ? 'Yes' : 'No'}`,
-        `Running BBMD IDs: ${(status.running_bbmd_ids || []).join(', ') || 'None'}`,
-        `Registered Objects: ${(status.registered_object_names || []).join(', ') || 'None'}`,
-        `BBMD Status: ${JSON.stringify(status.bbmd_status || {})}`
-    ].join('\n');
-    alert(summary);
-};
-
 window.fetchAlarms = async function() {
     try {
         const response = await fetch('/api/alarms?active_only=1');

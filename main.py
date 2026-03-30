@@ -14,6 +14,7 @@ from uvicorn import Config, Server
 
 from database import get_db_connection, init_db
 from engine import simulation_loop
+from modbus_runtime import ModbusRuntimeManager
 
 try:
     import BAC0
@@ -250,12 +251,18 @@ class BACnetManager:
 
 
 bacnet_manager = BACnetManager()
+modbus_manager = ModbusRuntimeManager()
 simulation_task: asyncio.Task | None = None
 
 
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
     return templates.TemplateResponse(request=request, name="index.html")
+
+
+@app.get("/bacnet/status", response_class=HTMLResponse)
+async def bacnet_status_page(request: Request):
+    return templates.TemplateResponse(request=request, name="bacnet_status.html")
 
 
 @app.websocket("/ws")
@@ -405,6 +412,11 @@ async def get_bacnet_status():
     }
 
 
+@app.get("/api/modbus/status")
+async def get_modbus_status():
+    return modbus_manager.status()
+
+
 @app.get("/api/assets/{name}")
 async def get_asset(name: str):
     conn = get_db_connection()
@@ -473,6 +485,9 @@ async def add_asset(asset: AssetIn):
         if is_bacnet and normalized_bbmd_id:
             asset_data = conn.execute("SELECT * FROM assets WHERE name = ?", (asset.name,)).fetchone()
             bacnet_manager.add_asset_to_bbmd(dict(asset_data))
+        elif asset.protocol == "modbus":
+            asset_data = conn.execute("SELECT * FROM assets WHERE name = ?", (asset.name,)).fetchone()
+            await modbus_manager.register_asset(dict(asset_data))
 
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -536,6 +551,11 @@ async def update_asset(name: str, asset: AssetIn):
             bacnet_manager.add_asset_to_bbmd(dict(asset_data))
         else:
             bacnet_manager.remove_asset(name)
+            if asset.protocol == "modbus":
+                asset_data = conn.execute("SELECT * FROM assets WHERE name = ?", (name,)).fetchone()
+                await modbus_manager.register_asset(dict(asset_data))
+            else:
+                await modbus_manager.unregister_asset(name)
 
     finally:
         _close_connection(conn)
@@ -548,6 +568,7 @@ async def delete_asset(name: str):
     conn = get_db_connection()
     try:
         bacnet_manager.remove_asset(name)
+        await modbus_manager.unregister_asset(name)
         conn.execute("DELETE FROM assets WHERE name = ?", (name,))
         conn.commit()
     finally:
@@ -595,6 +616,9 @@ async def _start_bacnet_devices():
         assets = conn.execute("SELECT * FROM assets WHERE protocol = 'bacnet' AND bbmd_id IS NOT NULL").fetchall()
         for asset in assets:
             bacnet_manager.add_asset_to_bbmd(dict(asset))
+
+        modbus_assets = conn.execute("SELECT * FROM assets WHERE protocol = 'modbus'").fetchall()
+        await modbus_manager.bootstrap([dict(a) for a in modbus_assets])
     finally:
         _close_connection(conn)
 
@@ -606,7 +630,7 @@ async def start_runtime():
     init_db()
     await _start_bacnet_devices()
     simulation_task = asyncio.create_task(
-        simulation_loop(None, bacnet_manager, ws_manager)
+        simulation_loop(modbus_manager, bacnet_manager, ws_manager)
     )
 
 
@@ -620,6 +644,7 @@ async def stop_runtime():
 
     for bbmd_id in list(bacnet_manager.bbmd_instances.keys()):
         bacnet_manager.stop_bbmd(bbmd_id)
+    await modbus_manager.shutdown()
 
 
 @app.on_event("startup")
