@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from contextlib import suppress
+from contextlib import asynccontextmanager, suppress
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
@@ -16,19 +16,15 @@ from database import get_db_connection, init_db
 from engine import simulation_loop
 from modbus_runtime import ModbusRuntimeManager
 
+BAC0_IMPORT_ERROR = None
 try:
     import BAC0
-    from bacpypes.basetypes import AnalogValue, BinaryValue, AnalogInput, AnalogOutput, BinaryInput, BinaryOutput
-    from bacpypes.primitivedata import Real
-except ImportError:
+except Exception as e:
     BAC0 = None
-    AnalogValue = None
-    BinaryValue = None
-    AnalogInput = None
-    AnalogOutput = None
-    BinaryInput = None
-    BinaryOutput = None
-    Real = None
+    BAC0_IMPORT_ERROR = str(e)
+
+# Legacy object-class placeholders. BAC0/bacpypes3 runtime may not expose these symbols.
+AnalogValue = BinaryValue = AnalogInput = AnalogOutput = BinaryInput = BinaryOutput = None
 
 APP_TITLE = "OLRT Lab Simulation Core"
 STATIC_DIR = "static"
@@ -39,7 +35,16 @@ BACNET_PROTOCOL = "bacnet"
 DEFAULT_BACNET_PORT = 47808
 DEFAULT_BACNET_DEVICE_ID = 1234
 
-app = FastAPI(title=APP_TITLE)
+@asynccontextmanager
+async def app_lifespan(_app: FastAPI):
+    await start_runtime()
+    try:
+        yield
+    finally:
+        await stop_runtime()
+
+
+app = FastAPI(title=APP_TITLE, lifespan=app_lifespan)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 templates = Jinja2Templates(directory=TEMPLATES_DIR)
 
@@ -194,6 +199,13 @@ class BACnetManager:
         try:
             stack = self.bbmd_instances[bbmd_id]
             obj_class = self._get_object_class(asset["sub_type"], asset["object_type"])
+            if obj_class is None:
+                self.bbmd_status[bbmd_id] = {
+                    "running": False,
+                    "message": "BACnet object classes unavailable in this Python/runtime. Install BAC0-compatible dependencies.",
+                }
+                print(f"[BACnet] Cannot create object class for {asset['name']}.")
+                return
 
             if asset["sub_type"] == "Digital":
                 obj = BAC0.core.devices.Device.ObjectFactory(
@@ -406,6 +418,7 @@ async def get_alarms(active_only: int = 1):
 async def get_bacnet_status():
     return {
         "bac0_installed": BAC0 is not None,
+        "bac0_import_error": BAC0_IMPORT_ERROR,
         "running_bbmd_ids": list(bacnet_manager.bbmd_instances.keys()),
         "bbmd_status": bacnet_manager.bbmd_status,
         "registered_object_names": list(bacnet_manager.objects.keys()),
@@ -647,24 +660,13 @@ async def stop_runtime():
     await modbus_manager.shutdown()
 
 
-@app.on_event("startup")
-async def startup_event():
-    await start_runtime()
-
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    await stop_runtime()
-
-
 async def main_task():
-    await start_runtime()
     config = Config(app=app, host=SERVER_HOST, port=SERVER_PORT)
-    try:
-        await Server(config).serve()
-    finally:
-        await stop_runtime()
+    await Server(config).serve()
 
 
 if __name__ == "__main__":
-    asyncio.run(main_task())
+    try:
+        asyncio.run(main_task())
+    except KeyboardInterrupt:
+        pass
