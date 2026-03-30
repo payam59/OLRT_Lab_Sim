@@ -1,84 +1,119 @@
 # OLRT_Lab_Sim
 
 ## Overview
-OLRT_Lab_Sim (Online Real-Time Lab Simulation) is a Python-based industrial asset simulation tool. It provides a web interface (FastAPI) to manage virtual assets, simulate their physical behavior (with random drift), and expose their data via common industrial protocols like Modbus TCP, DNP3, BACnet, and OPC UA.
+OLRT_Lab_Sim (Online Real-Time Lab Simulation) is a FastAPI-based industrial asset simulator for OT/ICS lab scenarios. It provides:
 
-The simulation engine updates asset values every second and logs the data in binary format, mimicking real-world industrial logging systems.
+- A web UI to create/manage simulated assets.
+- A 1-second simulation loop for analog drift and digital state behavior.
+- Protocol runtime integration for BACnet and Modbus TCP.
+- Alarm state detection, active alarm display, and alarm event history.
+- Service status views for BACnet BBMD and Modbus runtime endpoints.
 
-## Stack
+## Key Features
+
+### Asset simulation
+- Supports analog and digital assets.
+- Analog assets drift continuously based on configured drift rates.
+- Digital assets can flip state probabilistically on a configurable interval.
+- Manual override logic prevents automation from changing externally written points.
+
+### BACnet runtime
+- BBMD lifecycle management (`start`, `stop`, status tracking).
+- Dynamic object creation per asset with object types (`input`, `output`, `value`).
+- Runtime value update and remote-write detection support.
+- Optional BACnet object properties via JSON (`bacnet_properties`).
+
+### Modbus TCP runtime
+- In-process Modbus TCP server endpoints managed per configured IP/port.
+- Asset registration/unregistration with dynamic endpoint bootstrapping.
+- Register type support: `holding`, `input`, `coil`, `discrete`.
+- Analog values encoded as IEEE-754 float32 across two 16-bit registers.
+- Remote write detection for writable register types.
+- Configurable protocol alarm mapping:
+  - `modbus_alarm_address` (target alarm register/coil)
+  - `modbus_alarm_bit` (bit position for register-backed alarms)
+
+### Alarming and observability
+- Real-time threshold-based alarm detection for analog assets.
+- Alarm state persistence on each asset (`alarm_state`, `alarm_message`).
+- Alarm event lifecycle table (`alarm_events`) capturing raise/clear timestamps.
+- REST endpoints and UI widgets for active alarms and service health.
+
+### API and UI
+- CRUD APIs for assets and BBMD definitions.
+- Status endpoints for BACnet and Modbus runtime managers.
+- WebSocket broadcast of asset updates for live dashboard refresh.
+- UI pages for asset management and BACnet/Modbus status monitoring.
+
+## Tech Stack
 - **Language**: Python 3.14+
-- **Framework**: FastAPI (Web API), Pymodbus (Modbus Server), Jinja2 (Templating)
-- **Database**: SQLite3
-- **Frontend**: HTML, CSS, JavaScript (served by FastAPI)
-- **Serialization**: `struct` (Binary packing for industrial protocols)
+- **Backend**: FastAPI, Uvicorn, Pydantic
+- **Protocols**: BAC0 / bacpypes3 (BACnet), pymodbus (Modbus TCP)
+- **Database**: SQLite3 (with startup migrations)
+- **Frontend**: Jinja2 templates + vanilla JavaScript/CSS
 
 ## Requirements
 - Python 3.14+
-- A virtual environment is recommended.
-- Dependencies (estimated from imports):
+- Recommended: virtual environment
+- Python packages:
   - `fastapi`
   - `uvicorn`
   - `jinja2`
   - `pydantic`
   - `pymodbus`
-  - `sqlite3` (Built-in)
+  - `BAC0` (optional but required for BACnet runtime)
+  - `bacpypes3` (BACnet dependency)
 
 ## Setup
-1. **Clone the repository**:
-   ```powershell
+1. **Clone repository**
+   ```bash
    git clone <repository-url>
    cd OLRT_Lab_Sim
    ```
-
-2. **Create and activate a virtual environment**:
-   ```powershell
+2. **Create and activate virtual environment**
+   ```bash
    python -m venv .venv
-   .venv\Scripts\Activate.ps1  # Windows PowerShell
+   source .venv/bin/activate
    ```
-
-3. **Install dependencies**:
-   *(Note: No requirements.txt found. Install manually or generate one.)*
+   On Windows PowerShell:
    ```powershell
-   pip install fastapi uvicorn jinja2 pydantic pymodbus
+   .venv\Scripts\Activate.ps1
+   ```
+3. **Install dependencies**
+   ```bash
+   pip install fastapi uvicorn jinja2 pydantic pymodbus BAC0 bacpypes3
    ```
 
-## Running the Application
-The main entry point is `main.py`. It starts the FastAPI web server, the Modbus TCP server, and the simulation loop simultaneously.
-
-```powershell
+## Running the application
+```bash
 python main.py
 ```
 
-- **Web Interface**: `http://localhost:8000`
-- **Modbus TCP Server**: `0.0.0.0:5020`
-- **API Documentation**: `http://localhost:8000/docs`
-
-## Scripts and Entry Points
-- `main.py`: The main script that initializes the database, starts the Modbus server, and runs the FastAPI application.
-- `engine.py`: Contains the `simulation_loop` and data packing logic for various protocols.
-- `database.py`: Handles SQLite database initialization and migrations.
+- Web UI: `http://localhost:8000`
+- API docs: `http://localhost:8000/docs`
+- Default Modbus endpoint: `0.0.0.0:5020` (plus any additional configured endpoints)
 
 ## Project Structure
 ```text
 OLRT_Lab_Sim/
-├── main.py              # Entry point: Web API + Modbus Server + Simulation Task
-├── engine.py            # Simulation logic and protocol binary packing
-├── database.py          # SQLite database schema and connection management
-├── lab_assets.db        # SQLite database file (auto-generated)
-├── simulation_logs/     # Directory for binary log files (auto-generated)
-├── static/              # Frontend assets (CSS, JS)
+├── main.py                  # FastAPI app, lifecycle, API routes
+├── engine.py                # 1-second simulation loop + alarm detection
+├── database.py              # SQLite schema creation + migrations
+├── bacnet_runtime.py        # BACnet runtime manager (BBMD + objects)
+├── modbus_runtime.py        # Modbus runtime manager (endpoint + registers)
+├── templates/
+│   ├── index.html
+│   └── bacnet_status.html
+├── static/
 │   ├── script.js
 │   └── style.css
-└── templates/           # HTML templates (Jinja2)
-    └── index.html
+└── simulation_logs/         # Generated binary logs
 ```
 
-## Environment Variables
-Currently, no external environment variables are required. Configuration is hardcoded in `main.py` (e.g., host `0.0.0.0`, port `8000` for web, `5020` for Modbus).
-- TODO: Implement `.env` support for server ports and host configurations.
-
-## Tests
-- TODO: Add unit tests for simulation logic and API endpoints.
+## Notes
+- Database file (`lab_assets.db`) and log files are generated at runtime.
+- BACnet support is runtime-dependent: if BAC0 is not installed/importable, BACnet endpoints report status but cannot start.
+- Configuration is currently code-defined; environment-based config can be added later.
 
 ## License
-- TODO: Specify the license for this project.
+This project is licensed under the **MIT License**. See [LICENSE](./LICENSE) for full text.
