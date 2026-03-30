@@ -21,11 +21,13 @@ try:
     import BAC0
     from bacpypes3.local.analog import AnalogInputObject, AnalogOutputObject, AnalogValueObject
     from bacpypes3.local.binary import BinaryInputObject, BinaryOutputObject, BinaryValueObject
+    from BAC0.core.devices.local.factory import ObjectFactory
 except Exception as e:
     BAC0 = None
     BAC0_IMPORT_ERROR = str(e)
     AnalogInputObject = AnalogOutputObject = AnalogValueObject = None
     BinaryInputObject = BinaryOutputObject = BinaryValueObject = None
+    ObjectFactory = None
 
 APP_TITLE = "OLRT Lab Simulation Core"
 STATIC_DIR = "static"
@@ -208,24 +210,37 @@ class BACnetManager:
                 print(f"[BACnet] Cannot create object class for {asset['name']}.")
                 return
 
+            if ObjectFactory is None:
+                self.bbmd_status[bbmd_id] = {
+                    "running": False,
+                    "message": "BAC0 ObjectFactory is unavailable.",
+                }
+                print(f"[BACnet] Cannot create object for {asset['name']}: ObjectFactory missing.")
+                return
+
             if asset["sub_type"] == "Digital":
-                obj = BAC0.core.devices.Device.ObjectFactory(
-                    obj_class(
-                        instance=asset["address"],
-                        objectName=asset["name"],
-                        presentValue="active" if asset["current_value"] >= 0.5 else "inactive",
-                    )
+                present_val = "active" if asset["current_value"] >= 0.5 else "inactive"
+                factory = ObjectFactory(
+                    obj_class,
+                    instance=asset["address"],
+                    objectName=asset["name"],
+                    presentValue=present_val,
                 )
             else:
-                obj = BAC0.core.devices.Device.ObjectFactory(
-                    obj_class(
-                        instance=asset["address"],
-                        objectName=asset["name"],
-                        presentValue=float(asset["current_value"]),
-                    )
+                factory = ObjectFactory(
+                    obj_class,
+                    instance=asset["address"],
+                    objectName=asset["name"],
+                    presentValue=float(asset["current_value"]),
+                    properties={"units": "noUnits"},
                 )
 
-            stack.add_object(obj)
+            factory.add_objects_to_application(stack)
+            obj = factory.objects.get(asset["name"])
+            if not obj:
+                print(f"[BACnet] ObjectFactory did not return object for {asset['name']}")
+                return
+
             self.objects[asset["name"]] = obj
             self.asset_to_bbmd[asset["name"]] = bbmd_id
             print(f"[BACnet] Added {asset['sub_type']} {asset['object_type']} '{asset['name']}' (instance {asset['address']}) to BBMD {bbmd_id}")
@@ -250,7 +265,11 @@ class BACnetManager:
                 obj = self.objects[name]
                 if hasattr(obj, "presentValue"):
                     val = obj.presentValue
-                    return 1.0 if val == "active" else (0.0 if val == "inactive" else float(val))
+                    if str(val).lower() in ("active", "1", "true"):
+                        return 1.0
+                    if str(val).lower() in ("inactive", "0", "false"):
+                        return 0.0
+                    return float(val)
             except Exception as e:
                 print(f"[BACnet] Error reading {name}: {e}")
         return None

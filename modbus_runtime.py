@@ -4,12 +4,19 @@ import asyncio
 from collections import defaultdict
 
 try:
-    from pymodbus.datastore import ModbusSequentialDataBlock, ModbusServerContext, ModbusSlaveContext
+    from pymodbus.datastore import ModbusSequentialDataBlock, ModbusServerContext
+    try:
+        from pymodbus.datastore import ModbusSlaveContext  # pymodbus <=3.6
+        ModbusDeviceContext = None
+    except Exception:
+        from pymodbus.datastore import ModbusDeviceContext  # pymodbus newer 3.x
+        ModbusSlaveContext = None
     from pymodbus.server import StartAsyncTcpServer
 except Exception:  # pragma: no cover - runtime dependency check
     ModbusSequentialDataBlock = None
     ModbusServerContext = None
     ModbusSlaveContext = None
+    ModbusDeviceContext = None
     StartAsyncTcpServer = None
 
 
@@ -31,15 +38,17 @@ class ModbusRuntimeManager:
 
     def _new_context(self):
         # Large enough blocks for simulator indexing by address.
-        return ModbusServerContext(
-            slaves=ModbusSlaveContext(
-                di=ModbusSequentialDataBlock(0, [0] * 10000),
-                co=ModbusSequentialDataBlock(0, [0] * 10000),
-                hr=ModbusSequentialDataBlock(0, [0] * 10000),
-                ir=ModbusSequentialDataBlock(0, [0] * 10000),
-            ),
-            single=True,
+        blocks = dict(
+            di=ModbusSequentialDataBlock(0, [0] * 10000),
+            co=ModbusSequentialDataBlock(0, [0] * 10000),
+            hr=ModbusSequentialDataBlock(0, [0] * 10000),
+            ir=ModbusSequentialDataBlock(0, [0] * 10000),
         )
+        if ModbusSlaveContext is not None:
+            slave = ModbusSlaveContext(**blocks)
+        else:
+            slave = ModbusDeviceContext(**blocks)
+        return ModbusServerContext(slaves=slave, single=True)
 
     async def ensure_endpoint(self, ip: str, port: int):
         endpoint = (ip, port)
@@ -136,6 +145,7 @@ class ModbusRuntimeManager:
         if not self.installed:
             self.status_messages["global"] = "pymodbus is not installed."
             return
+        self.status_messages.pop("global", None)
         for asset in assets:
             if asset.get("protocol") == "modbus":
                 await self.register_asset(asset)
