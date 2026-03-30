@@ -4,15 +4,12 @@ import asyncio
 import time
 from contextlib import asynccontextmanager, suppress
 from typing import Optional
-
-from BAC0.core.devices.local.factory import ObjectFactory
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from uvicorn import Config, Server
-
 from database import get_db_connection, init_db
 from engine import simulation_loop
 from bacnet_runtime import BAC0, BAC0_IMPORT_ERROR, BACnetManager
@@ -109,170 +106,6 @@ def _initial_asset_value(asset: AssetIn) -> float:
     if asset.sub_type == "Digital":
         return 0.0 if asset.is_normally_open else 1.0
     return (asset.min_range + asset.max_range) / 2
-
-
-class LegacyBACnetManager:
-    """Manages BBMD devices and their associated BACnet objects"""
-    def __init__(self):
-        self.bbmd_instances = {}  # {bbmd_id: BAC0_instance}
-        self.objects = {}  # {asset_name: BACnet_object}
-        self.asset_to_bbmd = {}  # {asset_name: bbmd_id}
-        self.bbmd_status = {}  # {bbmd_id: {running: bool, message: str}}
-
-    def _get_object_class(self, sub_type, object_type):
-        """Returns the appropriate BACnet object class based on sub_type and object_type"""
-        if sub_type == "Digital":
-            if object_type == "input":
-                return BinaryInputObject
-            elif object_type == "output":
-                return BinaryOutputObject
-            else:  # value
-                return BinaryValueObject
-        else:  # Analog
-            if object_type == "input":
-                return AnalogInputObject
-            elif object_type == "output":
-                return AnalogOutputObject
-            else:  # value
-                return AnalogValueObject
-
-    def start_bbmd(self, bbmd):
-        """Start a BBMD device"""
-        bbmd_id = bbmd["id"]
-        if bbmd_id in self.bbmd_instances:
-            return
-        if not BAC0:
-            self.bbmd_status[bbmd_id] = {
-                "running": False,
-                "message": "BAC0 is not installed in the runtime environment.",
-            }
-            print(f"[BACnet] Cannot start BBMD '{bbmd['name']}': BAC0 not installed.")
-            return
-
-        try:
-            lite_args = dict(
-                port=bbmd["port"],
-                deviceId=bbmd["device_id"],
-                localObjName=bbmd["name"],
-            )
-            ip_address = (bbmd.get("ip_address") or "").strip()
-            if ip_address and ip_address != "0.0.0.0":
-                lite_args["ip"] = ip_address
-
-            new_stack = BAC0.lite(**lite_args)
-            self.bbmd_instances[bbmd_id] = new_stack
-            self.bbmd_status[bbmd_id] = {
-                "running": True,
-                "message": f"Listening on UDP {ip_address or 'auto-detected'}:{bbmd['port']}",
-            }
-            print(f"[BACnet] Started BBMD '{bbmd['name']}' on port {bbmd['port']} with device ID {bbmd['device_id']}")
-        except Exception as e:
-            self.bbmd_status[bbmd_id] = {"running": False, "message": str(e)}
-            print(f"[BACnet] Failed to start BBMD {bbmd['name']}: {e}")
-
-    def stop_bbmd(self, bbmd_id):
-        """Stop a BBMD device"""
-        if bbmd_id in self.bbmd_instances:
-            try:
-                self.bbmd_instances[bbmd_id].disconnect()
-                del self.bbmd_instances[bbmd_id]
-                self.bbmd_status[bbmd_id] = {"running": False, "message": "Stopped"}
-                print(f"[BACnet] Stopped BBMD {bbmd_id}")
-            except Exception as e:
-                print(f"[BACnet] Error stopping BBMD {bbmd_id}: {e}")
-
-    def add_asset_to_bbmd(self, asset):
-        """Add a BACnet object to an existing BBMD"""
-        if not BAC0:
-            return
-
-        bbmd_id = asset.get("bbmd_id")
-        if not bbmd_id or bbmd_id not in self.bbmd_instances:
-            print(f"[BACnet] BBMD {bbmd_id} not found for asset {asset['name']}")
-            return
-
-        try:
-            stack = self.bbmd_instances[bbmd_id]
-            obj_class = self._get_object_class(asset["sub_type"], asset["object_type"])
-            if obj_class is None:
-                self.bbmd_status[bbmd_id] = {
-                    "running": False,
-                    "message": "BACnet object classes unavailable in this Python/runtime. Install BAC0-compatible dependencies.",
-                }
-                print(f"[BACnet] Cannot create object class for {asset['name']}.")
-                return
-
-            if ObjectFactory is None:
-                self.bbmd_status[bbmd_id] = {
-                    "running": False,
-                    "message": "BAC0 ObjectFactory is unavailable.",
-                }
-                print(f"[BACnet] Cannot create object for {asset['name']}: ObjectFactory missing.")
-                return
-
-            if asset["sub_type"] == "Digital":
-                present_val = "active" if asset["current_value"] >= 0.5 else "inactive"
-                factory = ObjectFactory(
-                    obj_class,
-                    instance=asset["address"],
-                    objectName=asset["name"],
-                    presentValue=present_val,
-                    properties={},
-                )
-            else:
-                factory = ObjectFactory(
-                    obj_class,
-                    instance=asset["address"],
-                    objectName=asset["name"],
-                    presentValue=float(asset["current_value"]),
-                    properties={"units": "noUnits"},
-                )
-
-            factory.add_objects_to_application(stack)
-            obj = factory.objects.get(asset["name"])
-            if not obj:
-                print(f"[BACnet] ObjectFactory did not return object for {asset['name']}")
-                return
-
-            self.objects[asset["name"]] = obj
-            self.asset_to_bbmd[asset["name"]] = bbmd_id
-            print(f"[BACnet] Added {asset['sub_type']} {asset['object_type']} '{asset['name']}' (instance {asset['address']}) to BBMD {bbmd_id}")
-        except Exception as e:
-            print(f"[BACnet] Failed to add asset {asset['name']}: {e}")
-
-    def update_value(self, name, val, sub_type):
-        """Update BACnet object value"""
-        if name in self.objects:
-            try:
-                if sub_type == "Digital":
-                    self.objects[name].presentValue = "active" if val >= 0.5 else "inactive"
-                else:
-                    self.objects[name].presentValue = float(val)
-            except Exception as e:
-                print(f"[BACnet] Error updating {name}: {e}")
-
-    def get_value(self, name):
-        """Read BACnet object value (useful for detecting external writes)"""
-        if name in self.objects:
-            try:
-                obj = self.objects[name]
-                if hasattr(obj, "presentValue"):
-                    val = obj.presentValue
-                    if str(val).lower() in ("active", "1", "true"):
-                        return 1.0
-                    if str(val).lower() in ("inactive", "0", "false"):
-                        return 0.0
-                    return float(val)
-            except Exception as e:
-                print(f"[BACnet] Error reading {name}: {e}")
-        return None
-
-    def remove_asset(self, name):
-        """Remove an asset from its BBMD"""
-        if name in self.objects:
-            del self.objects[name]
-        if name in self.asset_to_bbmd:
-            del self.asset_to_bbmd[name]
 
 
 bacnet_manager = BACnetManager()
