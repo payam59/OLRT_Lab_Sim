@@ -1,6 +1,26 @@
 let socket;
 let bbmdList = [];
 
+function renderAlarms(alarms) {
+    const alarmList = document.getElementById('alarmList');
+    if (!alarmList) return;
+
+    if (alarms.length === 0) {
+        alarmList.innerHTML = '<div class="list-group-item text-muted">No active alarms.</div>';
+        return;
+    }
+
+    alarmList.innerHTML = alarms.map(a => `
+        <div class="list-group-item list-group-item-danger">
+            <div class="d-flex justify-content-between">
+                <strong>${a.asset_name}</strong>
+                <small>${new Date(a.created_at * 1000).toLocaleString()}</small>
+            </div>
+            <div>${a.message}</div>
+        </div>
+    `).join('');
+}
+
 function connectWebSocket() {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     socket = new WebSocket(`${protocol}//${window.location.host}/ws`);
@@ -43,10 +63,10 @@ function renderBBMDs(bbmds) {
                         <div><strong>IP:</strong> ${b.ip_address}</div>
                     </div>
                     <div class="d-flex gap-2">
-                        <button class="btn btn-sm btn-outline-primary" onclick="window.editBBMD(${b.id})">
+                        <button class="btn btn-sm btn-outline-primary" data-bbmd-edit="${b.id}" type="button">
                             <i class="fas fa-edit"></i> Edit
                         </button>
-                        <button class="btn btn-sm btn-outline-danger" onclick="window.deleteBBMD(${b.id})">
+                        <button class="btn btn-sm btn-outline-danger" data-bbmd-delete="${b.id}" type="button">
                             <i class="fas fa-trash"></i> Delete
                         </button>
                     </div>
@@ -70,6 +90,12 @@ function renderAssets(assets) {
         const cardBgClass = inAlarm ? "bg-danger-subtle" : (a.manual_override ? "overridden" : "");
         const bbmdBadge = a.bbmd_id ? `<span class="badge bg-success">BBMD #${a.bbmd_id}</span>` : '';
         const objectTypeBadge = `<span class="badge bg-info">${a.object_type || 'value'}</span>`;
+        const modbusBadge = a.protocol === 'modbus'
+            ? `<div class="small text-muted">Unit ${a.modbus_unit_id || 1} • ${a.modbus_register_type || 'holding'} @ ${a.address}</div>`
+            : '';
+        const bacnetBadge = a.protocol === 'bacnet'
+            ? `<div class="small text-muted">BACnet instance ${a.address}${a.bbmd_id ? ` • BBMD ${a.bbmd_id}` : ''}</div>`
+            : '';
 
         return `
         <div class="col-md-4 col-lg-3 mb-4">
@@ -89,6 +115,8 @@ function renderAssets(assets) {
                     <h6 class="mb-0 fw-bold">${a.name}</h6>
                     <small class="text-muted d-block mb-1">${isDigital ? (a.is_normally_open ? 'N.O.' : 'N.C.') : 'Analog'}</small>
                     <div class="mb-1">${bbmdBadge} ${objectTypeBadge}</div>
+                    ${bacnetBadge}
+                    ${modbusBadge}
                     <h2 class="value-display my-2 ${inAlarm ? 'text-danger fw-bold' : (isActive ? 'text-success' : '')}">${statusText}</h2>
                     ${!isDigital ? `<small class="text-muted">Range: ${a.min_range} - ${a.max_range}</small>` : ''}
                 </div>
@@ -122,6 +150,13 @@ window.fetchAssets = async function() {
     const response = await fetch('/api/assets');
     const assets = await response.json();
     renderAssets(assets);
+    window.fetchAlarms();
+};
+
+window.fetchAlarms = async function() {
+    const response = await fetch('/api/alarms?active_only=1');
+    const alarms = await response.json();
+    renderAlarms(alarms);
 };
 
 function updateBBMDSelects() {
@@ -132,7 +167,7 @@ function updateBBMDSelects() {
             if (bbmdList.length === 0) {
                 select.innerHTML = '<option value="">⚠ No BBMD configured - Add one first!</option>';
             } else {
-                select.innerHTML = '<option value="">Optional: Standalone (not recommended)</option>' +
+                select.innerHTML = '<option value="">Select BBMD (required for BACnet)</option>' +
                     bbmdList.map(b => `<option value="${b.id}">${b.name} - Port:${b.port} DevID:${b.device_id}</option>`).join('');
             }
         }
@@ -155,7 +190,7 @@ function updateBBMDList() {
                     <strong>${b.name}</strong> <small class="text-muted">${b.description}</small><br>
                     <small>Port: ${b.port} | Device ID: ${b.device_id} | IP: ${b.ip_address}</small>
                 </div>
-                <button class="btn btn-sm btn-danger" onclick="window.deleteBBMD(${b.id})">
+                <button class="btn btn-sm btn-danger" data-bbmd-delete="${b.id}" type="button">
                     <i class="fas fa-trash"></i>
                 </button>
             </div>
@@ -173,6 +208,11 @@ window.editBBMD = function(id) {
     const bbmd = bbmdList.find(b => b.id === id);
     if (!bbmd) return;
 
+    const bbmdModalElement = document.getElementById('bbmdModal');
+    if (bbmdModalElement) {
+        bootstrap.Modal.getOrCreateInstance(bbmdModalElement).show();
+    }
+
     document.getElementById('bbmdFormTitle').textContent = 'Edit BBMD Configuration';
     document.getElementById('bbmd_edit_id').value = id;
     document.getElementById('bbmd_name').value = bbmd.name;
@@ -182,8 +222,10 @@ window.editBBMD = function(id) {
     document.getElementById('bbmd_ip').value = bbmd.ip_address;
     document.getElementById('addBBMDForm').style.display = 'block';
 
-    // Scroll to form
-    document.getElementById('addBBMDForm').scrollIntoView({ behavior: 'smooth' });
+    // Scroll to form after modal is visible
+    setTimeout(() => {
+        document.getElementById('addBBMDForm').scrollIntoView({ behavior: 'smooth' });
+    }, 150);
 };
 
 window.cancelBBMDForm = function() {
@@ -261,8 +303,15 @@ window.saveNewAsset = async function() {
         change_probability: parseFloat(document.getElementById('prob').value) || 0,
         change_interval: parseInt(document.getElementById('interval').value) || 15,
         bbmd_id: isBacnet && bbmdValue ? parseInt(bbmdValue) : null,
-        object_type: isBacnet ? document.getElementById('object_type').value : 'value'
+        object_type: isBacnet ? document.getElementById('object_type').value : 'value',
+        modbus_unit_id: parseInt(document.getElementById('modbus_unit_id').value) || 1,
+        modbus_register_type: document.getElementById('modbus_register_type').value || 'holding'
     };
+
+    if (isBacnet && !data.bbmd_id) {
+        alert('BACnet assets must be mapped to a BBMD.');
+        return;
+    }
 
     const res = await fetch('/api/assets', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data) });
     if (res.ok) {
@@ -300,6 +349,8 @@ window.openEditModal = async function(name) {
     } else {
         document.getElementById('edit_modbus_addr').value = a.address;
         document.getElementById('edit_modbus_icon').value = a.icon;
+        document.getElementById('edit_modbus_unit_id').value = a.modbus_unit_id || 1;
+        document.getElementById('edit_modbus_register_type').value = a.modbus_register_type || 'holding';
     }
 
     window.toggleFields('edit_');
@@ -337,8 +388,15 @@ window.saveAssetEdit = async function() {
         change_probability: parseFloat(document.getElementById('edit_prob').value) || 0,
         change_interval: parseInt(document.getElementById('edit_interval').value) || 15,
         bbmd_id: isBacnet && bbmdValue ? parseInt(bbmdValue) : null,
-        object_type: isBacnet ? document.getElementById('edit_object_type').value : 'value'
+        object_type: isBacnet ? document.getElementById('edit_object_type').value : 'value',
+        modbus_unit_id: parseInt(document.getElementById('edit_modbus_unit_id').value) || 1,
+        modbus_register_type: document.getElementById('edit_modbus_register_type').value || 'holding'
     };
+
+    if (isBacnet && !data.bbmd_id) {
+        alert('BACnet assets must be mapped to a BBMD.');
+        return;
+    }
 
     const res = await fetch(`/api/assets/${name}`, {
         method: 'PUT',
@@ -402,6 +460,28 @@ window.toggleProtocolFields = function(prefix = '') {
 };
 
 document.addEventListener('DOMContentLoaded', () => {
+    const bbmdGrid = document.getElementById('bbmdGrid');
+    if (bbmdGrid) {
+        bbmdGrid.addEventListener('click', (event) => {
+            const target = event.target.closest('button');
+            if (!target) return;
+            const editId = target.getAttribute('data-bbmd-edit');
+            const deleteId = target.getAttribute('data-bbmd-delete');
+            if (editId) window.editBBMD(parseInt(editId));
+            if (deleteId) window.deleteBBMD(parseInt(deleteId));
+        });
+    }
+
+    const bbmdList = document.getElementById('bbmdList');
+    if (bbmdList) {
+        bbmdList.addEventListener('click', (event) => {
+            const target = event.target.closest('button');
+            if (!target) return;
+            const deleteId = target.getAttribute('data-bbmd-delete');
+            if (deleteId) window.deleteBBMD(parseInt(deleteId));
+        });
+    }
+
     window.fetchBBMDs();
     window.fetchAssets();
     connectWebSocket();
