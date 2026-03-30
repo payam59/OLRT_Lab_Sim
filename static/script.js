@@ -330,7 +330,12 @@ window.saveNewAsset = async function() {
         modbus_unit_id: parseInt(document.getElementById('modbus_unit_id').value) || 1,
         modbus_register_type: document.getElementById('modbus_register_type').value || 'holding',
         modbus_ip: document.getElementById('modbus_ip').value || '0.0.0.0',
-        modbus_port: parseInt(document.getElementById('modbus_port').value) || 5020
+        modbus_port: parseInt(document.getElementById('modbus_port').value) || 5020,
+        modbus_alarm_address: (() => {
+            const raw = document.getElementById('modbus_alarm_address').value;
+            return raw === '' ? null : parseInt(raw);
+        })(),
+        modbus_alarm_bit: parseInt(document.getElementById('modbus_alarm_bit').value) || 0
     };
 
     if (isBacnet && !data.bbmd_id) {
@@ -383,6 +388,8 @@ window.openEditModal = async function(name) {
         document.getElementById('edit_modbus_register_type').value = a.modbus_register_type || 'holding';
         document.getElementById('edit_modbus_ip').value = a.modbus_ip || '0.0.0.0';
         document.getElementById('edit_modbus_port').value = a.modbus_port || 5020;
+        document.getElementById('edit_modbus_alarm_address').value = a.modbus_alarm_address ?? '';
+        document.getElementById('edit_modbus_alarm_bit').value = a.modbus_alarm_bit ?? 0;
     }
 
     window.toggleFields('edit_');
@@ -425,7 +432,12 @@ window.saveAssetEdit = async function() {
         modbus_unit_id: parseInt(document.getElementById('edit_modbus_unit_id').value) || 1,
         modbus_register_type: document.getElementById('edit_modbus_register_type').value || 'holding',
         modbus_ip: document.getElementById('edit_modbus_ip').value || '0.0.0.0',
-        modbus_port: parseInt(document.getElementById('edit_modbus_port').value) || 5020
+        modbus_port: parseInt(document.getElementById('edit_modbus_port').value) || 5020,
+        modbus_alarm_address: (() => {
+            const raw = document.getElementById('edit_modbus_alarm_address').value;
+            return raw === '' ? null : parseInt(raw);
+        })(),
+        modbus_alarm_bit: parseInt(document.getElementById('edit_modbus_alarm_bit').value) || 0
     };
 
     if (isBacnet && !data.bbmd_id) {

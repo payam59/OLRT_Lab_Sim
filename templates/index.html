@@ -155,8 +155,6 @@
                             <div class="col"><label class="small">Change Prob (%)</label><input type="number" id="prob" class="form-control" value="10"></div>
                             <div class="col"><label class="small">Check Interval (min)</label><input type="number" id="interval" class="form-control" value="15"></div>
                         </div>
-                        <label class="small fw-bold">BACnet Extra Properties (JSON)</label>
-                        <textarea id="bacnet_properties" class="form-control mb-2" rows="2" placeholder='{"units":"noUnits"}'>{}</textarea>
                     </div>
 
                     <div id="bacnet_config_section" class="border-top pt-3 mt-3">
@@ -186,7 +184,8 @@
                             </div>
                         </div>
                         <label class="small fw-bold">BACnet Extra Properties (JSON)</label>
-                        <textarea id="edit_bacnet_properties" class="form-control mb-2" rows="2" placeholder='{"units":"noUnits"}'>{}</textarea>
+                        <textarea id="bacnet_properties" class="form-control mb-2" rows="2" placeholder='{"units":"degreesCelsius"}'>{}</textarea>
+                        <small class="text-muted d-block">Optional BACnet object properties in JSON (e.g. units, description, resolution).</small>
                     </div>
 
                     <div id="modbus_config_section" class="border-top pt-3 mt-3" style="display:none;">
@@ -232,6 +231,20 @@
                                     <option value="discrete">Discrete Input</option>
                                 </select>
                             </div>
+                        </div>
+                        <div class="border rounded p-2 bg-light">
+                            <label class="small fw-bold">Alarm Mapping (Optional)</label>
+                            <div class="row g-2 mt-1">
+                                <div class="col">
+                                    <label class="small">Alarm Address</label>
+                                    <input type="number" id="modbus_alarm_address" class="form-control" placeholder="e.g., 1001">
+                                </div>
+                                <div class="col">
+                                    <label class="small">Alarm Bit (0-15)</label>
+                                    <input type="number" id="modbus_alarm_bit" class="form-control" min="0" max="15" value="0">
+                                </div>
+                            </div>
+                            <small class="text-muted d-block mt-1">For coil/discrete, alarm address is written as 0/1. For register types, alarm bit is set/cleared in a holding register word.</small>
                         </div>
                     </div>
 
@@ -319,6 +332,9 @@
                                 </select>
                             </div>
                         </div>
+                        <label class="small fw-bold">BACnet Extra Properties (JSON)</label>
+                        <textarea id="edit_bacnet_properties" class="form-control mb-2" rows="2" placeholder='{"units":"degreesCelsius"}'>{}</textarea>
+                        <small class="text-muted d-block">Optional BACnet object properties in JSON (e.g. units, description, resolution).</small>
                     </div>
 
                     <div id="edit_modbus_config_section" class="border-top pt-3 mt-3" style="display:none;">
@@ -364,6 +380,20 @@
                                     <option value="discrete">Discrete Input</option>
                                 </select>
                             </div>
+                        </div>
+                        <div class="border rounded p-2 bg-light">
+                            <label class="small fw-bold">Alarm Mapping (Optional)</label>
+                            <div class="row g-2 mt-1">
+                                <div class="col">
+                                    <label class="small">Alarm Address</label>
+                                    <input type="number" id="edit_modbus_alarm_address" class="form-control" placeholder="e.g., 1001">
+                                </div>
+                                <div class="col">
+                                    <label class="small">Alarm Bit (0-15)</label>
+                                    <input type="number" id="edit_modbus_alarm_bit" class="form-control" min="0" max="15" value="0">
+                                </div>
+                            </div>
+                            <small class="text-muted d-block mt-1">For coil/discrete, alarm address is written as 0/1. For register types, alarm bit is set/cleared in a holding register word.</small>
                         </div>
                     </div>
 
