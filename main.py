@@ -19,12 +19,13 @@ from modbus_runtime import ModbusRuntimeManager
 BAC0_IMPORT_ERROR = None
 try:
     import BAC0
+    from bacpypes3.local.analog import AnalogInputObject, AnalogOutputObject, AnalogValueObject
+    from bacpypes3.local.binary import BinaryInputObject, BinaryOutputObject, BinaryValueObject
 except Exception as e:
     BAC0 = None
     BAC0_IMPORT_ERROR = str(e)
-
-# Legacy object-class placeholders. BAC0/bacpypes3 runtime may not expose these symbols.
-AnalogValue = BinaryValue = AnalogInput = AnalogOutput = BinaryInput = BinaryOutput = None
+    AnalogInputObject = AnalogOutputObject = AnalogValueObject = None
+    BinaryInputObject = BinaryOutputObject = BinaryValueObject = None
 
 APP_TITLE = "OLRT Lab Simulation Core"
 STATIC_DIR = "static"
@@ -128,18 +129,18 @@ class BACnetManager:
         """Returns the appropriate BACnet object class based on sub_type and object_type"""
         if sub_type == "Digital":
             if object_type == "input":
-                return BinaryInput
+                return BinaryInputObject
             elif object_type == "output":
-                return BinaryOutput
+                return BinaryOutputObject
             else:  # value
-                return BinaryValue
+                return BinaryValueObject
         else:  # Analog
             if object_type == "input":
-                return AnalogInput
+                return AnalogInputObject
             elif object_type == "output":
-                return AnalogOutput
+                return AnalogOutputObject
             else:  # value
-                return AnalogValue
+                return AnalogValueObject
 
     def start_bbmd(self, bbmd):
         """Start a BBMD device"""
@@ -274,6 +275,11 @@ async def index(request: Request):
 
 @app.get("/bacnet/status", response_class=HTMLResponse)
 async def bacnet_status_page(request: Request):
+    return templates.TemplateResponse(request=request, name="bacnet_status.html")
+
+
+@app.get("/status", response_class=HTMLResponse)
+async def status_page(request: Request):
     return templates.TemplateResponse(request=request, name="bacnet_status.html")
 
 
