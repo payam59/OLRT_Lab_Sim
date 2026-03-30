@@ -563,27 +563,30 @@ async def _start_bacnet_devices():
         _close_connection(conn)
 
 
+@asynccontextmanager
+async def app_lifespan(_app: FastAPI):
+    global simulation_task
+    init_db()
+    await _start_bacnet_devices()
+    simulation_task = asyncio.create_task(
+        simulation_loop(None, bacnet_manager, ws_manager)
+    )
+    try:
+        yield
+    finally:
+        if simulation_task:
+            simulation_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await simulation_task
+
+        for bbmd_id in list(bacnet_manager.bbmd_instances.keys()):
+            bacnet_manager.stop_bbmd(bbmd_id)
+
+
+app.router.lifespan_context = app_lifespan
+
+
 async def main_task():
-    @asynccontextmanager
-    async def lifespan(_app: FastAPI):
-        global simulation_task
-        init_db()
-        await _start_bacnet_devices()
-        simulation_task = asyncio.create_task(
-            simulation_loop(None, bacnet_manager, ws_manager)
-        )
-        try:
-            yield
-        finally:
-            if simulation_task:
-                simulation_task.cancel()
-                with suppress(asyncio.CancelledError):
-                    await simulation_task
-
-            for bbmd_id in list(bacnet_manager.bbmd_instances.keys()):
-                bacnet_manager.stop_bbmd(bbmd_id)
-
-    app.router.lifespan_context = lifespan
     config = Config(app=app, host=SERVER_HOST, port=SERVER_PORT)
     await Server(config).serve()
 
