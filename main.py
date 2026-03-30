@@ -698,7 +698,8 @@ async def stop_runtime():
 
 
 async def main_task():
-    config = Config(app=app, host=SERVER_HOST, port=SERVER_PORT)
+    # Disable per-request access logs (e.g. GET /api/assets) to reduce console noise.
+    config = Config(app=app, host=SERVER_HOST, port=SERVER_PORT, access_log=False)
     await Server(config).serve()
 
 
