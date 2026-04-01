@@ -67,6 +67,29 @@
 
         <div class="card shadow-sm mt-3">
             <div class="card-header bg-white">
+                <strong>Registered BACnet Objects</strong>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-sm align-middle">
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Object Type</th>
+                                <th>Instance</th>
+                                <th>Present Value</th>
+                            </tr>
+                        </thead>
+                        <tbody id="bacnetObjectsTable">
+                            <tr><td colspan="4" class="text-muted">Loading...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <div class="card shadow-sm mt-3">
+            <div class="card-header bg-white">
                 <strong>Modbus Service Status</strong>
             </div>
             <div class="card-body">
@@ -140,6 +163,17 @@
                 </tr>
             `).join('');
             bbmdTable.innerHTML = bbmdRows || '<tr><td colspan="3" class="text-muted">No BBMD runtime details.</td></tr>';
+
+            const objectsTable = document.getElementById('bacnetObjectsTable');
+            const objectRows = (bacnet.registered_objects || []).map((obj) => `
+                <tr>
+                    <td>${obj.name || ''}</td>
+                    <td>${obj.object_type || ''}</td>
+                    <td>${obj.instance ?? ''}</td>
+                    <td>${obj.present_value ?? ''}</td>
+                </tr>
+            `).join('');
+            objectsTable.innerHTML = objectRows || '<tr><td colspan="4" class="text-muted">No BACnet objects registered.</td></tr>';
 
             document.getElementById('modbusInstalled').textContent = modbus.pymodbus_installed ? 'Yes' : 'No';
             document.getElementById('modbusInstalled').className = modbus.pymodbus_installed ? 'fw-bold fs-5 text-success' : 'fw-bold fs-5 text-danger';
