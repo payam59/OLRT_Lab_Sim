@@ -273,7 +273,6 @@ async def get_bacnet_status():
         "running_bbmd_ids": list(bacnet_manager.bbmd_instances.keys()),
         "bbmd_status": bacnet_manager.bbmd_status,
         "registered_object_names": list(bacnet_manager.objects.keys()),
-        "registered_objects": bacnet_manager.object_details(),
     }
 
 

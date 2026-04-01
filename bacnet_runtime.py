@@ -70,6 +70,17 @@ class BACnetManager:
         if not bbmd_id or bbmd_id not in self.bbmd_instances:
             return
         stack = self.bbmd_instances[bbmd_id]
+        existing = self._find_existing_object(stack, asset.get("name"), asset.get("address"))
+        if existing is not None:
+            self.objects[asset["name"]] = existing
+            self.asset_to_bbmd[asset["name"]] = bbmd_id
+            self.update_value(asset["name"], asset.get("current_value", 0), asset["sub_type"])
+            return
+
+        # Prevent duplicate object-name/instance allocations on repeated edits.
+        if asset.get("name") in self.objects:
+            self.remove_asset(asset["name"])
+
         obj_class = self._get_object_class(asset["sub_type"], asset["object_type"])
         if not obj_class or ObjectFactory is None:
             self.bbmd_status[bbmd_id] = {"running": False, "message": "BACnet object classes/ObjectFactory unavailable."}
@@ -112,9 +123,81 @@ class BACnetManager:
             return float(val)
         return None
 
+    def object_details(self):
+        details = []
+        for name, obj in self.objects.items():
+            object_identifier = getattr(obj, "objectIdentifier", None)
+            object_type = None
+            instance = None
+            if isinstance(object_identifier, (list, tuple)) and len(object_identifier) == 2:
+                object_type, instance = object_identifier[0], object_identifier[1]
+            present = getattr(obj, "presentValue", None)
+            details.append(
+                {
+                    "name": name,
+                    "object_type": str(object_type) if object_type is not None else None,
+                    "instance": int(instance) if isinstance(instance, (int, float)) else instance,
+                    "present_value": str(present) if present is not None else None,
+                }
+            )
+        return details
+
     def remove_asset(self, name):
-        self.objects.pop(name, None)
-        self.asset_to_bbmd.pop(name, None)
+        obj = self.objects.pop(name, None)
+        bbmd_id = self.asset_to_bbmd.pop(name, None)
+        if not obj or not bbmd_id:
+            return
+        stack = self.bbmd_instances.get(bbmd_id)
+        if not stack:
+            return
+
+        app = (
+            getattr(stack, "this_application", None)
+            or getattr(stack, "application", None)
+            or getattr(stack, "app", None)
+        )
+        if not app:
+            return
+
+        for method_name in ("delete_object", "remove_object", "deleteObject", "removeObject"):
+            method = getattr(app, method_name, None)
+            if callable(method):
+                try:
+                    method(obj)
+                    return
+                except Exception:
+                    continue
+
+    def _find_existing_object(self, stack, name, instance):
+        app = (
+            getattr(stack, "this_application", None)
+            or getattr(stack, "application", None)
+            or getattr(stack, "app", None)
+        )
+        if not app:
+            return None
+
+        for method_name, arg in (
+            ("get_object_name", name),
+            ("getObjectName", name),
+            ("get_object_id", ("analogValue", instance)),
+            ("getObjectId", ("analogValue", instance)),
+        ):
+            method = getattr(app, method_name, None)
+            if callable(method):
+                try:
+                    found = method(arg)
+                    if found is not None:
+                        return found
+                except Exception:
+                    pass
+
+        for attr_name in ("objectName", "object_names", "objectIdentifier", "objectIdentifierMap"):
+            mapping = getattr(app, attr_name, None)
+            if isinstance(mapping, dict):
+                if name in mapping:
+                    return mapping[name]
+        return None
 
     def _parse_properties(self, raw):
         if not raw:
