@@ -112,6 +112,25 @@ class BACnetManager:
             return float(val)
         return None
 
+    def object_details(self):
+        details = []
+        for name, obj in self.objects.items():
+            object_identifier = getattr(obj, "objectIdentifier", None)
+            object_type = None
+            instance = None
+            if isinstance(object_identifier, (list, tuple)) and len(object_identifier) == 2:
+                object_type, instance = object_identifier[0], object_identifier[1]
+            present = getattr(obj, "presentValue", None)
+            details.append(
+                {
+                    "name": name,
+                    "object_type": str(object_type) if object_type is not None else None,
+                    "instance": int(instance) if isinstance(instance, (int, float)) else instance,
+                    "present_value": str(present) if present is not None else None,
+                }
+            )
+        return details
+
     def remove_asset(self, name):
         self.objects.pop(name, None)
         self.asset_to_bbmd.pop(name, None)
