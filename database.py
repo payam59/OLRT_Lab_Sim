@@ -54,6 +54,7 @@ def init_db():
             modbus_port INTEGER DEFAULT 5020,
             modbus_alarm_address INTEGER,
             modbus_alarm_bit INTEGER DEFAULT 0,
+            modbus_zero_based INTEGER DEFAULT 1,
             alarm_state INTEGER DEFAULT 0,
             alarm_message TEXT,
             FOREIGN KEY (bbmd_id) REFERENCES bbmd(id) ON DELETE SET NULL
@@ -95,6 +96,7 @@ def init_db():
         'modbus_port': 'INTEGER DEFAULT 5020',
         'modbus_alarm_address': 'INTEGER',
         'modbus_alarm_bit': 'INTEGER DEFAULT 0',
+        'modbus_zero_based': 'INTEGER DEFAULT 1',
         'alarm_state': 'INTEGER DEFAULT 0',
         'alarm_message': 'TEXT'
     }

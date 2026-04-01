@@ -34,35 +34,84 @@ class ModbusRuntimeManager:
     def installed(self) -> bool:
         return StartAsyncTcpServer is not None
 
+    @staticmethod
+    def _normalize_reference(address: int, register_type: str, zero_based: bool) -> tuple[str, int]:
+        """
+        Normalize simulator addressing so users can enter raw offsets (0,1,2)
+        or Kepware-style references (40001, 30001, 10001, 1/00001, 400001).
+        """
+        raw = int(address)
+        if raw < 0:
+            raise ValueError("Modbus address must be >= 0")
+
+        inferred_type = register_type
+        offset = raw
+        # Kepware/reference style (e.g. 40001, 30001, 10001, 00001, 400001)
+        if raw >= 10000:
+            ref = str(raw)
+            primary_table = ref[0]
+            item = int(ref[1:])
+            inferred_type = {
+                "0": "coil",
+                "1": "discrete",
+                "3": "input",
+                "4": "holding",
+            }.get(primary_table, register_type)
+            offset = item - 1 if zero_based else item
+
+        if offset < 0:
+            raise ValueError("Modbus address resolves to a negative offset")
+        return inferred_type, offset
+
     async def _serve_endpoint(self, endpoint: tuple[str, int], context):
         ip, port = endpoint
         await StartAsyncTcpServer(context=context, address=(ip, port))
 
-    def _new_context(self):
-        # Large enough blocks for simulator indexing by address.
+    def _new_device(self):
+        # 65536 follows the full Modbus two-byte reference space.
         blocks = dict(
-            di=ModbusSequentialDataBlock(0, [0] * 10000),
-            co=ModbusSequentialDataBlock(0, [0] * 10000),
-            hr=ModbusSequentialDataBlock(0, [0] * 10000),
-            ir=ModbusSequentialDataBlock(0, [0] * 10000),
+            di=ModbusSequentialDataBlock(0, [0] * 65536),
+            co=ModbusSequentialDataBlock(0, [0] * 65536),
+            hr=ModbusSequentialDataBlock(0, [0] * 65536),
+            ir=ModbusSequentialDataBlock(0, [0] * 65536),
         )
         if ModbusSlaveContext is not None:
-            slave = ModbusSlaveContext(**blocks)
-        else:
-            slave = ModbusDeviceContext(**blocks)
+            return ModbusSlaveContext(**blocks)
+        return ModbusDeviceContext(**blocks)
+
+    def _new_context(self, unit_ids: set[int]):
+        normalized_units = {max(0, min(int(u), 255)) for u in unit_ids} or {1}
+        if 0 not in normalized_units:
+            normalized_units.add(0)  # fallback/unit-0 compatibility
+        devices = {uid: self._new_device() for uid in normalized_units}
 
         server_params = inspect.signature(ModbusServerContext.__init__).parameters
         if "devices" in server_params:
-            return ModbusServerContext(devices=slave, single=True)
-        return ModbusServerContext(slaves=slave, single=True)
+            return ModbusServerContext(devices=devices, single=False)
+        return ModbusServerContext(slaves=devices, single=False)
 
-    async def ensure_endpoint(self, ip: str, port: int):
+    async def ensure_endpoint(self, ip: str, port: int, unit_id: int):
         endpoint = (ip, port)
-        if endpoint in self.server_tasks or not self.installed:
+        if not self.installed:
             return
 
-        context = self._new_context()
-        self.contexts[endpoint] = context
+        if endpoint not in self.contexts:
+            context = self._new_context({unit_id})
+            self.contexts[endpoint] = context
+        else:
+            context = self.contexts[endpoint]
+            try:
+                context[unit_id]
+            except Exception:
+                try:
+                    context[unit_id] = self._new_device()
+                except Exception:
+                    # Compatibility fallback for old context implementations.
+                    pass
+
+        if endpoint in self.server_tasks:
+            return
+
         task = asyncio.create_task(self._serve_endpoint(endpoint, context))
         self.server_tasks[endpoint] = task
         self.status_messages[f"{ip}:{port}"] = "running"
@@ -73,22 +122,30 @@ class ModbusRuntimeManager:
         port = int(asset.get("modbus_port") or 5020)
         endpoint = (ip, port)
 
-        # Remove old endpoint mapping if changed.
         old = self.asset_index.get(name)
         if old:
             await self.unregister_asset(name)
 
+        unit_id = max(0, min(int(asset.get("modbus_unit_id") or 1), 255))
+        zero_based = int(asset.get("modbus_zero_based") if asset.get("modbus_zero_based") is not None else 1) == 1
+        configured_type = asset.get("modbus_register_type") or "holding"
+        normalized_type, normalized_address = self._normalize_reference(
+            int(asset.get("address") or 0), configured_type, zero_based
+        )
+
         self.asset_index[name] = {
             "endpoint": endpoint,
-            "unit_id": int(asset.get("modbus_unit_id") or 1),
-            "register_type": asset.get("modbus_register_type") or "holding",
-            "address": int(asset.get("address") or 0),
+            "unit_id": unit_id,
+            "register_type": normalized_type,
+            "address": normalized_address,
+            "raw_address": int(asset.get("address") or 0),
             "alarm_address": asset.get("modbus_alarm_address"),
             "alarm_bit": int(asset.get("modbus_alarm_bit") or 0),
             "sub_type": asset.get("sub_type"),
+            "zero_based": zero_based,
         }
         self.endpoint_assets[endpoint].add(name)
-        await self.ensure_endpoint(ip, port)
+        await self.ensure_endpoint(ip, port, unit_id)
         self.write_value(asset)
 
     async def unregister_asset(self, name: str):
@@ -112,15 +169,26 @@ class ModbusRuntimeManager:
     def _set_for_type(self, register_type: str) -> int:
         return {"holding": 3, "input": 4, "coil": 1, "discrete": 2}.get(register_type, 3)
 
+    def _context_for_asset(self, mapping: dict):
+        context = self.contexts.get(mapping["endpoint"])
+        if not context:
+            return None
+        try:
+            return context[mapping["unit_id"]]
+        except Exception:
+            try:
+                return context[0]
+            except Exception:
+                return None
+
     def write_value(self, asset: dict):
         if not self.installed:
             return
         mapping = self.asset_index.get(asset["name"])
         if not mapping:
             return
-        endpoint = mapping["endpoint"]
-        context = self.contexts.get(endpoint)
-        if not context:
+        unit_context = self._context_for_asset(mapping)
+        if not unit_context:
             return
 
         addr = mapping["address"]
@@ -128,16 +196,15 @@ class ModbusRuntimeManager:
         value = asset.get("current_value", 0)
         if register_type in ("coil", "discrete"):
             value = 1 if float(value) >= 0.5 else 0
-            context[0x00].setValues(self._set_for_type(register_type), addr, [value])
+            unit_context.setValues(self._set_for_type(register_type), addr, [value])
         else:
-            # Preserve analog precision by storing IEEE-754 float32 across two registers.
             packed = struct.pack(">f", float(value))
             reg_hi, reg_lo = struct.unpack(">HH", packed)
-            context[0x00].setValues(self._set_for_type(register_type), addr, [reg_hi, reg_lo])
+            unit_context.setValues(self._set_for_type(register_type), addr, [reg_hi, reg_lo])
 
-        self._write_alarm_point(context, mapping, asset)
+        self._write_alarm_point(unit_context, mapping, asset)
 
-    def _write_alarm_point(self, context, mapping: dict, asset: dict):
+    def _write_alarm_point(self, unit_context, mapping: dict, asset: dict):
         alarm_addr_raw = mapping.get("alarm_address")
         if alarm_addr_raw is None:
             return
@@ -152,15 +219,15 @@ class ModbusRuntimeManager:
             bit = 0
         alarm_active = 1 if int(asset.get("alarm_state") or 0) else 0
         if mapping["register_type"] in ("coil", "discrete"):
-            context[0x00].setValues(1, alarm_addr, [alarm_active])
+            unit_context.setValues(1, alarm_addr, [alarm_active])
             return
-        existing = context[0x00].getValues(3, alarm_addr, count=1)
+        existing = unit_context.getValues(3, alarm_addr, count=1)
         word = int(existing[0]) if existing else 0
         if alarm_active:
             word |= (1 << bit)
         else:
             word &= ~(1 << bit)
-        context[0x00].setValues(3, alarm_addr, [word])
+        unit_context.setValues(3, alarm_addr, [word])
 
     def read_remote_value(self, asset: dict):
         if not self.installed:
@@ -168,14 +235,13 @@ class ModbusRuntimeManager:
         mapping = self.asset_index.get(asset["name"])
         if not mapping:
             return None
-        endpoint = mapping["endpoint"]
-        context = self.contexts.get(endpoint)
-        if not context:
+        unit_context = self._context_for_asset(mapping)
+        if not unit_context:
             return None
         addr = mapping["address"]
         register_type = mapping["register_type"]
         count = 1 if register_type in ("coil", "discrete") else 2
-        values = context[0x00].getValues(self._fc_for_type(register_type), addr, count=count)
+        values = unit_context.getValues(self._fc_for_type(register_type), addr, count=count)
         if not values:
             return None
         if register_type in ("coil", "discrete"):
@@ -208,4 +274,5 @@ class ModbusRuntimeManager:
             "endpoints": [f"{ip}:{port}" for ip, port in self.server_tasks.keys()],
             "asset_count": len(self.asset_index),
             "status_messages": self.status_messages,
+            "assets": self.asset_index,
         }
