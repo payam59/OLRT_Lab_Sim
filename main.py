@@ -95,6 +95,8 @@ class AssetIn(BaseModel):
     modbus_port: int = 5020
     modbus_alarm_address: Optional[int] = None
     modbus_alarm_bit: Optional[int] = 0
+    modbus_zero_based: Optional[int] = 1
+    modbus_word_order: Optional[str] = "low_high"
 
 
 def _close_connection(conn) -> None:
@@ -324,9 +326,9 @@ async def add_asset(asset: AssetIn):
                 bacnet_device_id, is_normally_open, change_probability,
                 change_interval, last_flip_check, bbmd_id, object_type, bacnet_properties,
                 modbus_unit_id, modbus_register_type, modbus_ip, modbus_port,
-                modbus_alarm_address, modbus_alarm_bit, alarm_state
+                modbus_alarm_address, modbus_alarm_bit, modbus_zero_based, modbus_word_order, alarm_state
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 cleaned_name,
@@ -355,6 +357,8 @@ async def add_asset(asset: AssetIn):
                 asset.modbus_port,
                 asset.modbus_alarm_address,
                 asset.modbus_alarm_bit or 0,
+                1 if int(asset.modbus_zero_based or 1) else 0,
+                asset.modbus_word_order or "low_high",
                 0,
             ),
         )
@@ -395,7 +399,7 @@ async def update_asset(name: str, asset: AssetIn):
                 bacnet_device_id = ?, is_normally_open = ?, change_probability = ?,
                 change_interval = ?, bbmd_id = ?, object_type = ?, modbus_unit_id = ?,
                 bacnet_properties = ?, modbus_register_type = ?, modbus_ip = ?, modbus_port = ?,
-                modbus_alarm_address = ?, modbus_alarm_bit = ?
+                modbus_alarm_address = ?, modbus_alarm_bit = ?, modbus_zero_based = ?, modbus_word_order = ?
             WHERE name = ?
             """,
             (
@@ -422,6 +426,8 @@ async def update_asset(name: str, asset: AssetIn):
                 asset.modbus_port,
                 asset.modbus_alarm_address,
                 asset.modbus_alarm_bit or 0,
+                1 if int(asset.modbus_zero_based or 1) else 0,
+                asset.modbus_word_order or "low_high",
                 name,
             ),
         )
