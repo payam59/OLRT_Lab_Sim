@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import time
 from contextlib import asynccontextmanager, suppress
 from typing import Optional
@@ -14,6 +15,7 @@ from database import get_db_connection, init_db
 from engine import simulation_loop
 from bacnet_runtime import BAC0, BAC0_IMPORT_ERROR, BACnetManager
 from modbus_runtime import ModbusRuntimeManager
+from dnp3_runtime import DNP3RuntimeManager
 
 APP_TITLE = "OLRT Lab Simulation Core"
 STATIC_DIR = "static"
@@ -95,6 +97,13 @@ class AssetIn(BaseModel):
     modbus_port: int = 5020
     modbus_alarm_address: Optional[int] = None
     modbus_alarm_bit: Optional[int] = 0
+    dnp3_ip: str = "0.0.0.0"
+    dnp3_port: int = 20000
+    dnp3_outstation_address: int = 10
+    dnp3_master_address: int = 1
+    dnp3_point_class: str = "analog_output"
+    dnp3_event_class: int = 1
+    dnp3_static_variation: int = 0
 
 
 def _close_connection(conn) -> None:
@@ -108,9 +117,37 @@ def _initial_asset_value(asset: AssetIn) -> float:
     return (asset.min_range + asset.max_range) / 2
 
 
+def _enrich_dnp3_asset(asset: dict) -> dict:
+    if asset.get("protocol") != "dnp3":
+        return asset
+    mapping = dnp3_manager.asset_index.get(asset.get("name"), {})
+    asset["dnp3_kepware_address"] = mapping.get("kepware_address")
+    asset["dnp3_writable"] = mapping.get("writable")
+    return asset
+
+
 bacnet_manager = BACnetManager()
 modbus_manager = ModbusRuntimeManager()
+dnp3_manager = DNP3RuntimeManager()
 simulation_task: asyncio.Task | None = None
+
+
+def _build_simulation_loop_task() -> asyncio.Task:
+    """
+    Build simulation loop task with backward-compatible argument passing.
+    Supports both legacy signature:
+        simulation_loop(modbus_block, bacnet_manager, ws_manager=None)
+    and extended signature:
+        simulation_loop(modbus_block, bacnet_manager, ws_manager=None, dnp3_manager=None)
+    """
+    params = inspect.signature(simulation_loop).parameters
+    if "dnp3_manager" in params:
+        return asyncio.create_task(
+            simulation_loop(modbus_manager, bacnet_manager, ws_manager, dnp3_manager)
+        )
+    return asyncio.create_task(
+        simulation_loop(modbus_manager, bacnet_manager, ws_manager)
+    )
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -243,7 +280,7 @@ async def get_assets():
     conn = get_db_connection()
     try:
         assets = conn.execute("SELECT * FROM assets").fetchall()
-        return [dict(asset) for asset in assets]
+        return [_enrich_dnp3_asset(dict(asset)) for asset in assets]
     finally:
         _close_connection(conn)
 
@@ -295,6 +332,10 @@ async def get_bacnet_status():
 async def get_modbus_status():
     return modbus_manager.status()
 
+@app.get("/api/dnp3/status")
+async def get_dnp3_status():
+    return dnp3_manager.status()
+
 
 @app.get("/api/assets/{name}")
 async def get_asset(name: str):
@@ -303,7 +344,7 @@ async def get_asset(name: str):
         asset = conn.execute("SELECT * FROM assets WHERE name = ?", (name,)).fetchone()
         if not asset:
             raise HTTPException(status_code=404, detail="Asset not found")
-        return dict(asset)
+        return _enrich_dnp3_asset(dict(asset))
     finally:
         _close_connection(conn)
 
@@ -326,6 +367,8 @@ async def add_asset(asset: AssetIn):
 
         if asset.protocol == "modbus" and not (asset.modbus_ip or "").strip():
             raise HTTPException(status_code=400, detail="Modbus IP is required for Modbus assets")
+        if asset.protocol == "dnp3" and not (asset.dnp3_ip or "").strip():
+            raise HTTPException(status_code=400, detail="DNP3 IP is required for DNP3 assets")
 
         normalized_bbmd_id = asset.bbmd_id if is_bacnet else None
         normalized_object_type = asset.object_type if is_bacnet else "value"
@@ -339,9 +382,11 @@ async def add_asset(asset: AssetIn):
                 bacnet_device_id, is_normally_open, change_probability,
                 change_interval, last_flip_check, bbmd_id, object_type, bacnet_properties,
                 modbus_unit_id, modbus_register_type, modbus_ip, modbus_port,
-                modbus_alarm_address, modbus_alarm_bit, alarm_state
+                modbus_alarm_address, modbus_alarm_bit,
+                dnp3_ip, dnp3_port, dnp3_outstation_address, dnp3_master_address,
+                dnp3_point_class, dnp3_event_class, dnp3_static_variation, alarm_state
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 cleaned_name,
@@ -370,6 +415,13 @@ async def add_asset(asset: AssetIn):
                 asset.modbus_port,
                 asset.modbus_alarm_address,
                 asset.modbus_alarm_bit or 0,
+                asset.dnp3_ip,
+                asset.dnp3_port,
+                asset.dnp3_outstation_address,
+                asset.dnp3_master_address,
+                asset.dnp3_point_class,
+                asset.dnp3_event_class,
+                asset.dnp3_static_variation,
                 0,
             ),
         )
@@ -382,6 +434,9 @@ async def add_asset(asset: AssetIn):
         elif asset.protocol == "modbus":
             asset_data = conn.execute("SELECT * FROM assets WHERE name = ?", (asset.name,)).fetchone()
             await modbus_manager.register_asset(dict(asset_data))
+        elif asset.protocol == "dnp3":
+            asset_data = conn.execute("SELECT * FROM assets WHERE name = ?", (asset.name,)).fetchone()
+            await dnp3_manager.register_asset(dict(asset_data))
 
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -398,6 +453,10 @@ async def update_asset(name: str, asset: AssetIn):
         is_bacnet = asset.protocol == BACNET_PROTOCOL
         if is_bacnet and not asset.bbmd_id:
             raise HTTPException(status_code=400, detail="BACnet assets require a BBMD assignment")
+        if asset.protocol == "modbus" and not (asset.modbus_ip or "").strip():
+            raise HTTPException(status_code=400, detail="Modbus IP is required for Modbus assets")
+        if asset.protocol == "dnp3" and not (asset.dnp3_ip or "").strip():
+            raise HTTPException(status_code=400, detail="DNP3 IP is required for DNP3 assets")
 
         normalized_bbmd_id = asset.bbmd_id if is_bacnet else None
         normalized_object_type = asset.object_type if is_bacnet else "value"
@@ -410,7 +469,9 @@ async def update_asset(name: str, asset: AssetIn):
                 bacnet_device_id = ?, is_normally_open = ?, change_probability = ?,
                 change_interval = ?, bbmd_id = ?, object_type = ?, modbus_unit_id = ?,
                 bacnet_properties = ?, modbus_register_type = ?, modbus_ip = ?, modbus_port = ?,
-                modbus_alarm_address = ?, modbus_alarm_bit = ?
+                modbus_alarm_address = ?, modbus_alarm_bit = ?,
+                dnp3_ip = ?, dnp3_port = ?, dnp3_outstation_address = ?, dnp3_master_address = ?,
+                dnp3_point_class = ?, dnp3_event_class = ?, dnp3_static_variation = ?
             WHERE name = ?
             """,
             (
@@ -437,6 +498,13 @@ async def update_asset(name: str, asset: AssetIn):
                 asset.modbus_port,
                 asset.modbus_alarm_address,
                 asset.modbus_alarm_bit or 0,
+                asset.dnp3_ip,
+                asset.dnp3_port,
+                asset.dnp3_outstation_address,
+                asset.dnp3_master_address,
+                asset.dnp3_point_class,
+                asset.dnp3_event_class,
+                asset.dnp3_static_variation,
                 name,
             ),
         )
@@ -447,13 +515,21 @@ async def update_asset(name: str, asset: AssetIn):
             bacnet_manager.remove_asset(name)
             asset_data = conn.execute("SELECT * FROM assets WHERE name = ?", (name,)).fetchone()
             bacnet_manager.add_asset_to_bbmd(dict(asset_data))
+            await modbus_manager.unregister_asset(name)
+            await dnp3_manager.unregister_asset(name)
         else:
             bacnet_manager.remove_asset(name)
             if asset.protocol == "modbus":
                 asset_data = conn.execute("SELECT * FROM assets WHERE name = ?", (name,)).fetchone()
                 await modbus_manager.register_asset(dict(asset_data))
+                await dnp3_manager.unregister_asset(name)
+            elif asset.protocol == "dnp3":
+                asset_data = conn.execute("SELECT * FROM assets WHERE name = ?", (name,)).fetchone()
+                await dnp3_manager.register_asset(dict(asset_data))
+                await modbus_manager.unregister_asset(name)
             else:
                 await modbus_manager.unregister_asset(name)
+                await dnp3_manager.unregister_asset(name)
 
     finally:
         _close_connection(conn)
@@ -467,6 +543,7 @@ async def delete_asset(name: str):
     try:
         bacnet_manager.remove_asset(name)
         await modbus_manager.unregister_asset(name)
+        await dnp3_manager.unregister_asset(name)
         conn.execute("DELETE FROM assets WHERE name = ?", (name,))
         conn.commit()
     finally:
@@ -478,14 +555,32 @@ async def delete_asset(name: str):
 @app.put("/api/override/{name}")
 async def override(name: str, value: float):
     conn = get_db_connection()
+    asset_row = None
     try:
-        conn.execute(
+        cursor = conn.execute(
             "UPDATE assets SET current_value = ?, manual_override = 1 WHERE name = ?",
             (value, name),
         )
+        if cursor.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Asset not found")
+
+        asset_row = conn.execute("SELECT * FROM assets WHERE name = ?", (name,)).fetchone()
         conn.commit()
     finally:
         _close_connection(conn)
+
+    if asset_row:
+        asset_dict = dict(asset_row)
+        if asset_dict.get("protocol") == "bacnet":
+            bacnet_manager.update_value(
+                asset_dict["name"],
+                asset_dict["current_value"],
+                asset_dict.get("sub_type", "Analog"),
+            )
+        elif asset_dict.get("protocol") == "modbus":
+            modbus_manager.write_value(asset_dict)
+        elif asset_dict.get("protocol") == "dnp3":
+            dnp3_manager.write_value(asset_dict)
 
     return {"status": "locked"}
 
@@ -517,6 +612,8 @@ async def _start_bacnet_devices():
 
         modbus_assets = conn.execute("SELECT * FROM assets WHERE protocol = 'modbus'").fetchall()
         await modbus_manager.bootstrap([dict(a) for a in modbus_assets])
+        dnp3_assets = conn.execute("SELECT * FROM assets WHERE protocol = 'dnp3'").fetchall()
+        await dnp3_manager.bootstrap([dict(a) for a in dnp3_assets])
     finally:
         _close_connection(conn)
 
@@ -527,9 +624,7 @@ async def start_runtime():
         return
     init_db()
     await _start_bacnet_devices()
-    simulation_task = asyncio.create_task(
-        simulation_loop(modbus_manager, bacnet_manager, ws_manager)
-    )
+    simulation_task = _build_simulation_loop_task()
 
 
 async def stop_runtime():
@@ -543,6 +638,7 @@ async def stop_runtime():
     for bbmd_id in list(bacnet_manager.bbmd_instances.keys()):
         bacnet_manager.stop_bbmd(bbmd_id)
     await modbus_manager.shutdown()
+    await dnp3_manager.shutdown()
 
 
 async def main_task():

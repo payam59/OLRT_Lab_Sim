@@ -17,6 +17,12 @@ class DNP3RuntimeManager:
         self.asset_index: dict[str, dict] = {}
         self.point_values: dict[str, float] = {}
         self.status_messages: dict[str, str] = {}
+        self.profiles = {
+            "binary_input": {"group": 1, "variation": 2, "writable": False},
+            "binary_output": {"group": 10, "variation": 2, "writable": True},
+            "analog_input": {"group": 30, "variation": 5, "writable": False},
+            "analog_output": {"group": 40, "variation": 4, "writable": True},
+        }
 
     @property
     def installed(self) -> bool:
@@ -38,15 +44,22 @@ class DNP3RuntimeManager:
             await self.unregister_asset(name)
 
         point_class = (asset.get("dnp3_point_class") or "").strip().lower() or "analog_output"
+        profile = self.profiles.get(point_class, self.profiles["analog_output"])
         point_index = max(0, int(asset.get("address") or 0))
+        outstation_address = asset.get("dnp3_outstation_address")
+        master_address = asset.get("dnp3_master_address")
         self.asset_index[name] = {
             "endpoint": endpoint,
             "point_class": point_class,
             "point_index": point_index,
-            "outstation_address": int(asset.get("dnp3_outstation_address") or 10),
-            "master_address": int(asset.get("dnp3_master_address") or 1),
+            "group": int(profile["group"]),
+            "variation": int(profile["variation"]),
+            "writable": bool(profile["writable"]),
+            "outstation_address": int(10 if outstation_address is None else outstation_address),
+            "master_address": int(1 if master_address is None else master_address),
             "event_class": int(asset.get("dnp3_event_class") or 1),
             "static_variation": int(asset.get("dnp3_static_variation") or 0),
+            "kepware_address": f"{profile['group']}.{profile['variation']}.{point_index}.Val",
         }
         self.endpoint_assets[endpoint].add(name)
         self.point_values[name] = float(asset.get("current_value") or 0.0)
@@ -94,6 +107,8 @@ class DNP3RuntimeManager:
     def status(self):
         return {
             "dnp3_runtime_ready": self.installed,
+            "transport_mode": "in_process_simulation",
+            "transport_note": "No wire-level DNP3 outstation stack is active in this runtime.",
             "endpoints": [f"{ip}:{port}" for ip, port in self.endpoint_assets.keys()],
             "asset_count": len(self.asset_index),
             "status_messages": self.status_messages,
