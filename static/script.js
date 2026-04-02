@@ -105,6 +105,11 @@ function renderAssets(assets) {
             ? `<div class="small text-muted">Unit ${a.modbus_unit_id || 1} • ${a.modbus_register_type || 'holding'} @ ${a.address}</div>
                <div class="small text-muted">TCP ${a.modbus_ip || '0.0.0.0'}:${a.modbus_port || 5020}</div>`
             : '';
+        const dnp3Badge = a.protocol === 'dnp3'
+            ? `<div class="small text-muted">${a.dnp3_point_class || 'analog_output'} @ ${a.address}</div>
+               <div class="small text-muted">DNP3 ${a.dnp3_ip || '0.0.0.0'}:${a.dnp3_port ?? 20000} • M${a.dnp3_master_address ?? 1}/O${a.dnp3_outstation_address ?? 10}</div>
+               <div class="small text-muted">Kepware tag: ${a.dnp3_kepware_address || 'auto'}</div>`
+            : '';
         const bacnetBadge = a.protocol === 'bacnet'
             ? `<div class="small text-muted">BACnet instance ${a.address}${a.bbmd_id ? ` • BBMD ${a.bbmd_id}` : ''}</div>`
             : '';
@@ -129,6 +134,7 @@ function renderAssets(assets) {
                     <div class="mb-1">${bbmdBadge} ${objectTypeBadge}</div>
                     ${bacnetBadge}
                     ${modbusBadge}
+                    ${dnp3Badge}
                     <h2 class="value-display my-2 ${inAlarm ? 'text-danger fw-bold' : (isActive ? 'text-success' : '')}">${statusText}</h2>
                     ${!isDigital ? `<small class="text-muted">Range: ${a.min_range} - ${a.max_range}</small>` : ''}
                 </div>
@@ -297,6 +303,8 @@ window.deleteBBMD = async function(id) {
 window.saveNewAsset = async function() {
     const protocol = document.getElementById('protocol').value;
     const isBacnet = protocol === 'bacnet';
+    const isModbus = protocol === 'modbus';
+    const isDnp3 = protocol === 'dnp3';
     const bbmdValue = document.getElementById('bbmd_select').value;
     const assetName = (document.getElementById('name').value || '').trim();
 
@@ -306,12 +314,16 @@ window.saveNewAsset = async function() {
     }
 
     // Get address and icon based on protocol
-    const address = isBacnet ?
-        parseInt(document.getElementById('addr').value) :
-        parseInt(document.getElementById('modbus_addr').value);
-    const icon = isBacnet ?
-        document.getElementById('icon').value :
-        document.getElementById('modbus_icon').value;
+    const address = isBacnet
+        ? parseInt(document.getElementById('addr').value)
+        : (isModbus
+            ? parseInt(document.getElementById('modbus_addr').value)
+            : parseInt(document.getElementById('dnp3_addr').value));
+    const icon = isBacnet
+        ? document.getElementById('icon').value
+        : (isModbus
+            ? document.getElementById('modbus_icon').value
+            : document.getElementById('dnp3_icon').value);
 
     const data = {
         name: assetName,
@@ -341,15 +353,32 @@ window.saveNewAsset = async function() {
             const raw = document.getElementById('modbus_alarm_address').value;
             return raw === '' ? null : parseInt(raw);
         })(),
-        modbus_alarm_bit: parseInt(document.getElementById('modbus_alarm_bit').value) || 0
+        modbus_alarm_bit: parseInt(document.getElementById('modbus_alarm_bit').value) || 0,
+        dnp3_ip: document.getElementById('dnp3_ip').value || '0.0.0.0',
+        dnp3_port: parseInt(document.getElementById('dnp3_port').value) || 20000,
+        dnp3_outstation_address: (() => {
+            const parsed = parseInt(document.getElementById('dnp3_outstation_address').value);
+            return Number.isNaN(parsed) ? 10 : parsed;
+        })(),
+        dnp3_master_address: (() => {
+            const parsed = parseInt(document.getElementById('dnp3_master_address').value);
+            return Number.isNaN(parsed) ? 1 : parsed;
+        })(),
+        dnp3_point_class: document.getElementById('dnp3_point_class').value || 'analog_output',
+        dnp3_event_class: parseInt(document.getElementById('dnp3_event_class').value) || 1,
+        dnp3_static_variation: parseInt(document.getElementById('dnp3_static_variation').value) || 0
     };
 
     if (isBacnet && !data.bbmd_id) {
         alert('BACnet assets must be mapped to a BBMD.');
         return;
     }
-    if (!isBacnet && !data.modbus_ip) {
+    if (isModbus && !data.modbus_ip) {
         alert('Modbus IP is required for Modbus assets.');
+        return;
+    }
+    if (isDnp3 && !data.dnp3_ip) {
+        alert('DNP3 IP is required for DNP3 assets.');
         return;
     }
 
@@ -383,10 +412,11 @@ window.openEditModal = async function(name) {
 
     // Set address and icon based on protocol
     const isBacnet = a.protocol === 'bacnet';
+    const isModbus = a.protocol === 'modbus';
     if (isBacnet) {
         document.getElementById('edit_addr').value = a.address;
         document.getElementById('edit_icon').value = a.icon;
-    } else {
+    } else if (isModbus) {
         document.getElementById('edit_modbus_addr').value = a.address;
         document.getElementById('edit_modbus_icon').value = a.icon;
         document.getElementById('edit_modbus_unit_id').value = a.modbus_unit_id || 1;
@@ -397,6 +427,16 @@ window.openEditModal = async function(name) {
         document.getElementById('edit_modbus_word_order').value = a.modbus_word_order || 'low_high';
         document.getElementById('edit_modbus_alarm_address').value = a.modbus_alarm_address ?? '';
         document.getElementById('edit_modbus_alarm_bit').value = a.modbus_alarm_bit ?? 0;
+    } else {
+        document.getElementById('edit_dnp3_addr').value = a.address;
+        document.getElementById('edit_dnp3_icon').value = a.icon;
+        document.getElementById('edit_dnp3_ip').value = a.dnp3_ip || '0.0.0.0';
+        document.getElementById('edit_dnp3_port').value = a.dnp3_port || 20000;
+        document.getElementById('edit_dnp3_outstation_address').value = a.dnp3_outstation_address ?? 10;
+        document.getElementById('edit_dnp3_master_address').value = a.dnp3_master_address ?? 1;
+        document.getElementById('edit_dnp3_point_class').value = a.dnp3_point_class || 'analog_output';
+        document.getElementById('edit_dnp3_event_class').value = a.dnp3_event_class || 1;
+        document.getElementById('edit_dnp3_static_variation').value = a.dnp3_static_variation || 0;
     }
 
     window.toggleFields('edit_');
@@ -408,15 +448,21 @@ window.saveAssetEdit = async function() {
     const name = document.getElementById('edit_name').value;
     const protocol = document.getElementById('edit_protocol').value;
     const isBacnet = protocol === 'bacnet';
+    const isModbus = protocol === 'modbus';
+    const isDnp3 = protocol === 'dnp3';
     const bbmdValue = document.getElementById('edit_bbmd_select').value;
 
     // Get address and icon based on protocol
-    const address = isBacnet ?
-        parseInt(document.getElementById('edit_addr').value) :
-        parseInt(document.getElementById('edit_modbus_addr').value);
-    const icon = isBacnet ?
-        document.getElementById('edit_icon').value :
-        document.getElementById('edit_modbus_icon').value;
+    const address = isBacnet
+        ? parseInt(document.getElementById('edit_addr').value)
+        : (isModbus
+            ? parseInt(document.getElementById('edit_modbus_addr').value)
+            : parseInt(document.getElementById('edit_dnp3_addr').value));
+    const icon = isBacnet
+        ? document.getElementById('edit_icon').value
+        : (isModbus
+            ? document.getElementById('edit_modbus_icon').value
+            : document.getElementById('edit_dnp3_icon').value);
 
     const data = {
         name: name,
@@ -446,7 +492,20 @@ window.saveAssetEdit = async function() {
             const raw = document.getElementById('edit_modbus_alarm_address').value;
             return raw === '' ? null : parseInt(raw);
         })(),
-        modbus_alarm_bit: parseInt(document.getElementById('edit_modbus_alarm_bit').value) || 0
+        modbus_alarm_bit: parseInt(document.getElementById('edit_modbus_alarm_bit').value) || 0,
+        dnp3_ip: document.getElementById('edit_dnp3_ip').value || '0.0.0.0',
+        dnp3_port: parseInt(document.getElementById('edit_dnp3_port').value) || 20000,
+        dnp3_outstation_address: (() => {
+            const parsed = parseInt(document.getElementById('edit_dnp3_outstation_address').value);
+            return Number.isNaN(parsed) ? 10 : parsed;
+        })(),
+        dnp3_master_address: (() => {
+            const parsed = parseInt(document.getElementById('edit_dnp3_master_address').value);
+            return Number.isNaN(parsed) ? 1 : parsed;
+        })(),
+        dnp3_point_class: document.getElementById('edit_dnp3_point_class').value || 'analog_output',
+        dnp3_event_class: parseInt(document.getElementById('edit_dnp3_event_class').value) || 1,
+        dnp3_static_variation: parseInt(document.getElementById('edit_dnp3_static_variation').value) || 0
     };
 
     if (isBacnet && !data.bbmd_id) {
@@ -502,20 +561,35 @@ window.toggleFields = function(prefix = '') {
 };
 
 window.toggleProtocolFields = function(prefix = '') {
-    const protocol = document.getElementById(prefix + 'protocol').value;
+    const protocolSelect = document.getElementById(prefix + 'protocol');
+    const protocol = ((protocolSelect && protocolSelect.value) || '').toLowerCase().trim();
     const isBacnet = protocol === 'bacnet';
+    const isModbus = protocol === 'modbus';
+    const isDnp3 = protocol === 'dnp3' || protocol === 'dnp';
 
     // Toggle config sections
     const bacnetSection = document.getElementById(prefix + 'bacnet_config_section');
     const modbusSection = document.getElementById(prefix + 'modbus_config_section');
+    const dnp3Section = document.getElementById(prefix + 'dnp3_config_section');
     const objectTypeContainer = document.getElementById(prefix + 'object_type_container');
 
     if (bacnetSection) bacnetSection.style.display = isBacnet ? 'block' : 'none';
-    if (modbusSection) modbusSection.style.display = isBacnet ? 'none' : 'block';
+    if (modbusSection) modbusSection.style.display = isModbus ? 'block' : 'none';
+    if (dnp3Section) dnp3Section.style.display = isDnp3 ? 'block' : 'none';
     if (objectTypeContainer) objectTypeContainer.style.display = isBacnet ? 'block' : 'none';
 };
 
 document.addEventListener('DOMContentLoaded', () => {
+    const addProtocolSelect = document.getElementById('protocol');
+    if (addProtocolSelect) {
+        addProtocolSelect.addEventListener('change', () => window.toggleProtocolFields(''));
+    }
+    const editProtocolSelect = document.getElementById('edit_protocol');
+    if (editProtocolSelect) {
+        editProtocolSelect.addEventListener('change', () => window.toggleProtocolFields('edit_'));
+    }
+    window.toggleProtocolFields('');
+
     const bbmdGrid = document.getElementById('bbmdGrid');
     if (bbmdGrid) {
         bbmdGrid.addEventListener('click', (event) => {

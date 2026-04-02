@@ -6,6 +6,7 @@ OLRT_Lab_Sim (Online Real-Time Lab Simulation) is a FastAPI-based industrial ass
 - A web UI to create/manage simulated assets.
 - A 1-second simulation loop for analog drift and digital state behavior.
 - Protocol runtime integration for BACnet and Modbus TCP.
+- Protocol runtime integration for BACnet, Modbus TCP, and DNP3.
 - Alarm state detection, active alarm display, and alarm event history.
 - Service status views for BACnet BBMD and Modbus runtime endpoints.
 
@@ -32,6 +33,17 @@ OLRT_Lab_Sim (Online Real-Time Lab Simulation) is a FastAPI-based industrial ass
 - Configurable protocol alarm mapping:
   - `modbus_alarm_address` (target alarm register/coil)
   - `modbus_alarm_bit` (bit position for register-backed alarms)
+
+### DNP3 runtime
+- Endpoint and point mapping for DNP3 assets.
+- Point class support for analog/binary input and output style points.
+- Runtime value update and remote-write detection support for writable classes.
+- Kepware-style profile mapping per point class:
+  - `binary_input` -> `1.2.<index>.Val` (read)
+  - `binary_output` -> `10.2.<index>.Val` (read/write)
+  - `analog_input` -> `30.5.<index>.Val` (read)
+  - `analog_output` -> `40.4.<index>.Val` (read/write)
+- Runtime currently operates in-process simulation mode (no external DNP3 wire stack by default).
 
 ### Alarming and observability
 - Real-time threshold-based alarm detection for analog assets.
@@ -101,6 +113,7 @@ OLRT_Lab_Sim/
 ├── database.py              # SQLite schema creation + migrations
 ├── bacnet_runtime.py        # BACnet runtime manager (BBMD + objects)
 ├── modbus_runtime.py        # Modbus runtime manager (endpoint + registers)
+├── dnp3_runtime.py          # DNP3 runtime manager (endpoint + points)
 ├── templates/
 │   ├── index.html
 │   └── bacnet_status.html
