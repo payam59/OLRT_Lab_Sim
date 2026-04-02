@@ -78,10 +78,12 @@
                                 <th>Object Type</th>
                                 <th>Instance</th>
                                 <th>Present Value</th>
+                                <th>Device Instance</th>
+                                <th>UDP Bind</th>
                             </tr>
                         </thead>
                         <tbody id="bacnetObjectsTable">
-                            <tr><td colspan="4" class="text-muted">Loading...</td></tr>
+                            <tr><td colspan="6" class="text-muted">Loading...</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -171,9 +173,11 @@
                     <td>${obj.object_type || ''}</td>
                     <td>${obj.instance ?? ''}</td>
                     <td>${obj.present_value ?? ''}</td>
+                    <td>${obj.device_id ?? ''}</td>
+                    <td>${obj.bind_ip || '0.0.0.0'}:${obj.bind_port ?? ''}</td>
                 </tr>
             `).join('');
-            objectsTable.innerHTML = objectRows || '<tr><td colspan="4" class="text-muted">No BACnet objects registered.</td></tr>';
+            objectsTable.innerHTML = objectRows || '<tr><td colspan="6" class="text-muted">No BACnet objects registered.</td></tr>';
 
             document.getElementById('modbusInstalled').textContent = modbus.pymodbus_installed ? 'Yes' : 'No';
             document.getElementById('modbusInstalled').className = modbus.pymodbus_installed ? 'fw-bold fs-5 text-success' : 'fw-bold fs-5 text-danger';

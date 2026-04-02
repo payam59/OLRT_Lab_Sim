@@ -105,14 +105,6 @@
                     <input type="text" id="name" class="form-control mb-2">
                     <div class="row mb-2">
                         <div class="col">
-                            <label class="small fw-bold">Category</label>
-                            <select id="type" class="form-select">
-                                <option value="Temp">Temperature</option>
-                                <option value="Fan">Ventilation</option>
-                                <option value="Light">Lighting</option>
-                            </select>
-                        </div>
-                        <div class="col">
                             <label class="small fw-bold">Sub-Type</label>
                             <select id="sub_type" class="form-select" onchange="toggleFields('')">
                                 <option value="Analog">Analog</option>
@@ -180,6 +172,10 @@
                                     <option value="fa-lightbulb">Light</option>
                                     <option value="fa-gauge">Pressure</option>
                                     <option value="fa-droplet">Humidity</option>
+                                    <option value="fa-bolt">Power</option>
+                                    <option value="fa-water">Flow/Water</option>
+                                    <option value="fa-gears">Motor/Drive</option>
+                                    <option value="fa-industry">Industrial</option>
                                 </select>
                             </div>
                         </div>
@@ -204,6 +200,10 @@
                                     <option value="fa-lightbulb">Light</option>
                                     <option value="fa-gauge">Pressure</option>
                                     <option value="fa-droplet">Humidity</option>
+                                    <option value="fa-bolt">Power</option>
+                                    <option value="fa-water">Flow/Water</option>
+                                    <option value="fa-gears">Motor/Drive</option>
+                                    <option value="fa-industry">Industrial</option>
                                 </select>
                             </div>
                         </div>
@@ -282,7 +282,6 @@
                 <div class="modal-body">
                     <input type="hidden" id="edit_name">
                     <div class="row mb-2">
-                        <div class="col"><label class="small fw-bold">Category</label><select id="edit_type" class="form-select"><option value="Temp">Temp</option><option value="Fan">Fan</option><option value="Light">Light</option></select></div>
                         <div class="col"><label class="small fw-bold">Sub-Type</label><select id="edit_sub_type" class="form-select" onchange="toggleFields('edit_')"><option value="Analog">Analog</option><option value="Digital">Digital</option></select></div>
                     </div>
 
@@ -341,6 +340,10 @@
                                     <option value="fa-lightbulb">Light</option>
                                     <option value="fa-gauge">Pressure</option>
                                     <option value="fa-droplet">Humidity</option>
+                                    <option value="fa-bolt">Power</option>
+                                    <option value="fa-water">Flow/Water</option>
+                                    <option value="fa-gears">Motor/Drive</option>
+                                    <option value="fa-industry">Industrial</option>
                                 </select>
                             </div>
                         </div>
@@ -365,6 +368,10 @@
                                     <option value="fa-lightbulb">Light</option>
                                     <option value="fa-gauge">Pressure</option>
                                     <option value="fa-droplet">Humidity</option>
+                                    <option value="fa-bolt">Power</option>
+                                    <option value="fa-water">Flow/Water</option>
+                                    <option value="fa-gears">Motor/Drive</option>
+                                    <option value="fa-industry">Industrial</option>
                                 </select>
                             </div>
                         </div>

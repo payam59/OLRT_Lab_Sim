@@ -38,25 +38,26 @@ async def simulation_loop(modbus_block, bacnet_manager, ws_manager=None):
                 asset_changed = False
                 alarm_changed = False
 
-                # 1. BACnet/Modbus remote write detection (only when asset is in auto mode)
-                if not asset_dict['manual_override']:
-                    if asset_dict['protocol'] == "bacnet" and asset_dict.get('object_type') in ['output', 'value']:
-                        remote_val = bacnet_manager.get_value(asset_dict['name'])
+                # 1. BACnet/Modbus remote write detection.
+                # Keep this active even during manual override so repeated external writes
+                # are reflected in DB/state and not ignored after the first write.
+                if asset_dict['protocol'] == "bacnet" and asset_dict.get('object_type') in ['output', 'value']:
+                    remote_val = bacnet_manager.get_value(asset_dict['name'])
+                    if remote_val is not None and abs(remote_val - original_value) > 0.01:
+                        cursor.execute("UPDATE assets SET current_value = ?, manual_override = 1 WHERE id = ?",
+                                       (remote_val, asset_dict['id']))
+                        asset_dict['current_value'] = remote_val
+                        asset_dict['manual_override'] = 1
+                        asset_changed = True
+                elif asset_dict['protocol'] == "modbus" and modbus_block:
+                    if asset_dict.get('modbus_register_type') in ['holding', 'coil']:
+                        remote_val = modbus_block.read_remote_value(asset_dict)
                         if remote_val is not None and abs(remote_val - original_value) > 0.01:
                             cursor.execute("UPDATE assets SET current_value = ?, manual_override = 1 WHERE id = ?",
                                            (remote_val, asset_dict['id']))
                             asset_dict['current_value'] = remote_val
                             asset_dict['manual_override'] = 1
                             asset_changed = True
-                    elif asset_dict['protocol'] == "modbus" and modbus_block:
-                        if asset_dict.get('modbus_register_type') in ['holding', 'coil']:
-                            remote_val = modbus_block.read_remote_value(asset_dict)
-                            if remote_val is not None and abs(remote_val - original_value) > 0.01:
-                                cursor.execute("UPDATE assets SET current_value = ?, manual_override = 1 WHERE id = ?",
-                                               (remote_val, asset_dict['id']))
-                                asset_dict['current_value'] = remote_val
-                                asset_dict['manual_override'] = 1
-                                asset_changed = True
 
                 # 2. Automation Logic (only if not manually overridden)
                 if not asset_dict['manual_override']:
@@ -117,7 +118,12 @@ async def simulation_loop(modbus_block, bacnet_manager, ws_manager=None):
                 if asset_dict['protocol'] == "bacnet":
                     bacnet_manager.update_value(asset_dict['name'], asset_dict['current_value'], asset_dict['sub_type'])
                 elif asset_dict['protocol'] == "modbus" and modbus_block:
-                    modbus_block.write_value(asset_dict)
+                    register_type = (asset_dict.get('modbus_register_type') or '').lower()
+                    writable = register_type in ['holding', 'coil']
+                    # Avoid clobbering freshly-written external values on writable points.
+                    # For writable points we only push when simulator/alarm state changed.
+                    if asset_changed or alarm_changed or not writable:
+                        modbus_block.write_value(asset_dict)
 
                 updated_assets.append(asset_dict)
                 if asset_changed:

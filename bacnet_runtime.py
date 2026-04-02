@@ -18,8 +18,10 @@ except Exception as e:
 class BACnetManager:
     def __init__(self):
         self.bbmd_instances = {}
+        self.bbmd_config = {}
         self.objects = {}
         self.asset_to_bbmd = {}
+        self.object_meta = {}
         self.bbmd_status = {}
 
     def _get_object_class(self, sub_type, object_type):
@@ -38,6 +40,7 @@ class BACnetManager:
 
     def start_bbmd(self, bbmd):
         bbmd_id = bbmd["id"]
+        self.bbmd_config[bbmd_id] = dict(bbmd)
         if bbmd_id in self.bbmd_instances:
             return
         if not BAC0:
@@ -70,10 +73,11 @@ class BACnetManager:
         if not bbmd_id or bbmd_id not in self.bbmd_instances:
             return
         stack = self.bbmd_instances[bbmd_id]
-        existing = self._find_existing_object(stack, asset.get("name"), asset.get("address"))
+        existing = self._find_existing_object(stack, asset.get("name"), asset.get("address"), asset.get("object_type"), asset.get("sub_type"))
         if existing is not None:
             self.objects[asset["name"]] = existing
             self.asset_to_bbmd[asset["name"]] = bbmd_id
+            self.object_meta[asset["name"]] = self._build_object_meta(asset, bbmd_id)
             self.update_value(asset["name"], asset.get("current_value", 0), asset["sub_type"])
             return
 
@@ -105,6 +109,7 @@ class BACnetManager:
         if obj:
             self.objects[asset["name"]] = obj
             self.asset_to_bbmd[asset["name"]] = bbmd_id
+            self.object_meta[asset["name"]] = self._build_object_meta(asset, bbmd_id)
 
     def update_value(self, name, val, sub_type):
         if name in self.objects:
@@ -126,11 +131,16 @@ class BACnetManager:
     def object_details(self):
         details = []
         for name, obj in self.objects.items():
+            meta = self.object_meta.get(name, {})
             object_identifier = getattr(obj, "objectIdentifier", None)
             object_type = None
             instance = None
             if isinstance(object_identifier, (list, tuple)) and len(object_identifier) == 2:
                 object_type, instance = object_identifier[0], object_identifier[1]
+            if object_type is None:
+                object_type = meta.get("object_type")
+            if instance is None:
+                instance = meta.get("instance")
             present = getattr(obj, "presentValue", None)
             details.append(
                 {
@@ -138,6 +148,10 @@ class BACnetManager:
                     "object_type": str(object_type) if object_type is not None else None,
                     "instance": int(instance) if isinstance(instance, (int, float)) else instance,
                     "present_value": str(present) if present is not None else None,
+                    "bbmd_id": meta.get("bbmd_id"),
+                    "device_id": meta.get("device_id"),
+                    "bind_ip": meta.get("bind_ip"),
+                    "bind_port": meta.get("bind_port"),
                 }
             )
         return details
@@ -145,6 +159,7 @@ class BACnetManager:
     def remove_asset(self, name):
         obj = self.objects.pop(name, None)
         bbmd_id = self.asset_to_bbmd.pop(name, None)
+        self.object_meta.pop(name, None)
         if not obj or not bbmd_id:
             return
         stack = self.bbmd_instances.get(bbmd_id)
@@ -168,7 +183,7 @@ class BACnetManager:
                 except Exception:
                     continue
 
-    def _find_existing_object(self, stack, name, instance):
+    def _find_existing_object(self, stack, name, instance, object_type, sub_type):
         app = (
             getattr(stack, "this_application", None)
             or getattr(stack, "application", None)
@@ -177,11 +192,19 @@ class BACnetManager:
         if not app:
             return None
 
+        object_id_candidates = []
+        resolved_type = self._resolve_object_identifier_type(sub_type, object_type)
+        if resolved_type is not None:
+            object_id_candidates.append((resolved_type, instance))
+        object_id_candidates.append(("analogValue", instance))
+
         for method_name, arg in (
             ("get_object_name", name),
             ("getObjectName", name),
-            ("get_object_id", ("analogValue", instance)),
-            ("getObjectId", ("analogValue", instance)),
+            ("get_object_id", object_id_candidates[0]),
+            ("getObjectId", object_id_candidates[0]),
+            ("get_object_id", object_id_candidates[-1]),
+            ("getObjectId", object_id_candidates[-1]),
         ):
             method = getattr(app, method_name, None)
             if callable(method):
@@ -198,6 +221,30 @@ class BACnetManager:
                 if name in mapping:
                     return mapping[name]
         return None
+
+    def _resolve_object_identifier_type(self, sub_type, object_type):
+        if sub_type == "Digital":
+            return {
+                "input": "binaryInput",
+                "output": "binaryOutput",
+                "value": "binaryValue",
+            }.get(object_type or "value")
+        return {
+            "input": "analogInput",
+            "output": "analogOutput",
+            "value": "analogValue",
+        }.get(object_type or "value")
+
+    def _build_object_meta(self, asset, bbmd_id):
+        bbmd_cfg = self.bbmd_config.get(bbmd_id, {})
+        return {
+            "bbmd_id": bbmd_id,
+            "device_id": bbmd_cfg.get("device_id") or asset.get("bacnet_device_id"),
+            "bind_ip": bbmd_cfg.get("ip_address"),
+            "bind_port": bbmd_cfg.get("port") or asset.get("bacnet_port"),
+            "object_type": self._resolve_object_identifier_type(asset.get("sub_type"), asset.get("object_type")),
+            "instance": asset.get("address"),
+        }
 
     def _parse_properties(self, raw):
         if not raw:

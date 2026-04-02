@@ -315,7 +315,7 @@ window.saveNewAsset = async function() {
 
     const data = {
         name: assetName,
-        type: document.getElementById('type').value,
+        type: 'General',
         sub_type: document.getElementById('sub_type').value,
         protocol: protocol,
         address: address,
@@ -367,7 +367,6 @@ window.openEditModal = async function(name) {
     const a = await res.json();
 
     document.getElementById('edit_name').value = a.name;
-    document.getElementById('edit_type').value = a.type;
     document.getElementById('edit_sub_type').value = a.sub_type;
     document.getElementById('edit_protocol').value = a.protocol;
     document.getElementById('edit_min').value = a.min_range;
@@ -421,7 +420,7 @@ window.saveAssetEdit = async function() {
 
     const data = {
         name: name,
-        type: document.getElementById('edit_type').value,
+        type: 'General',
         sub_type: document.getElementById('edit_sub_type').value,
         protocol: protocol,
         address: address,
