@@ -119,6 +119,7 @@
                             <select id="protocol" class="form-select" onchange="toggleProtocolFields('')">
                                 <option value="bacnet">BACnet/IP</option>
                                 <option value="modbus">Modbus TCP</option>
+                                <option value="dnp3">DNP3</option>
                             </select>
                         </div>
                         <div class="col" id="object_type_container">
@@ -260,6 +261,73 @@
                         </div>
                     </div>
 
+                    <div id="dnp3_config_section" class="border-top pt-3 mt-3" style="display:none;">
+                        <h6 class="small fw-bold text-secondary"><i class="fas fa-network-wired me-1"></i>DNP3 Configuration</h6>
+                        <div class="row mb-2">
+                            <div class="col">
+                                <label class="small fw-bold">Point Index <span class="text-danger">*</span></label>
+                                <input type="number" id="dnp3_addr" class="form-control" value="0" placeholder="e.g., 0">
+                            </div>
+                            <div class="col">
+                                <label class="small">Icon</label>
+                                <select id="dnp3_icon" class="form-select">
+                                    <option value="fa-thermometer-half">Temperature</option>
+                                    <option value="fa-fan">Fan</option>
+                                    <option value="fa-lightbulb">Light</option>
+                                    <option value="fa-gauge">Pressure</option>
+                                    <option value="fa-droplet">Humidity</option>
+                                    <option value="fa-bolt">Power</option>
+                                    <option value="fa-water">Flow/Water</option>
+                                    <option value="fa-gears">Motor/Drive</option>
+                                    <option value="fa-industry">Industrial</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="row mb-2">
+                            <div class="col">
+                                <label class="small fw-bold">DNP3 IP</label>
+                                <input type="text" id="dnp3_ip" class="form-control" value="0.0.0.0">
+                            </div>
+                            <div class="col">
+                                <label class="small fw-bold">DNP3 Port</label>
+                                <input type="number" id="dnp3_port" class="form-control" value="20000">
+                            </div>
+                        </div>
+                        <div class="row mb-2">
+                            <div class="col">
+                                <label class="small fw-bold">Outstation Address</label>
+                                <input type="number" id="dnp3_outstation_address" class="form-control" value="10">
+                            </div>
+                            <div class="col">
+                                <label class="small fw-bold">Master Address</label>
+                                <input type="number" id="dnp3_master_address" class="form-control" value="1">
+                            </div>
+                        </div>
+                        <div class="row mb-2">
+                            <div class="col">
+                                <label class="small fw-bold">Point Class</label>
+                                <select id="dnp3_point_class" class="form-select">
+                                    <option value="analog_output">Analog Output (R/W)</option>
+                                    <option value="analog_input">Analog Input (R)</option>
+                                    <option value="binary_output">Binary Output (R/W)</option>
+                                    <option value="binary_input">Binary Input (R)</option>
+                                </select>
+                            </div>
+                            <div class="col">
+                                <label class="small fw-bold">Event Class</label>
+                                <select id="dnp3_event_class" class="form-select">
+                                    <option value="1">Class 1</option>
+                                    <option value="2">Class 2</option>
+                                    <option value="3">Class 3</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="mb-2">
+                            <label class="small fw-bold">Static Variation</label>
+                            <input type="number" id="dnp3_static_variation" class="form-control" value="0">
+                        </div>
+                    </div>
+
                     <div class="bg-secondary text-white p-2 rounded small mt-2" style="display:none;">
                         <div class="row">
                             <div class="col">BACnet Port: <input type="number" id="bac_port" class="form-control form-control-sm" value="47808"></div>
@@ -288,7 +356,7 @@
                     <div class="row mb-2">
                         <div class="col">
                             <label class="small fw-bold">Protocol</label>
-                            <select id="edit_protocol" class="form-select" onchange="toggleProtocolFields('edit_')"><option value="bacnet">BACnet</option><option value="modbus">Modbus</option></select>
+                            <select id="edit_protocol" class="form-select" onchange="toggleProtocolFields('edit_')"><option value="bacnet">BACnet</option><option value="modbus">Modbus</option><option value="dnp3">DNP3</option></select>
                         </div>
                         <div class="col" id="edit_object_type_container">
                             <label class="small fw-bold">Object Type</label>
@@ -424,6 +492,73 @@
                                 </div>
                             </div>
                             <small class="text-muted d-block mt-1">For coil/discrete, alarm address is written as 0/1. For register types, alarm bit is set/cleared in a holding register word.</small>
+                        </div>
+                    </div>
+
+                    <div id="edit_dnp3_config_section" class="border-top pt-3 mt-3" style="display:none;">
+                        <h6 class="small fw-bold text-secondary"><i class="fas fa-network-wired me-1"></i>DNP3 Configuration</h6>
+                        <div class="row mb-2">
+                            <div class="col">
+                                <label class="small fw-bold">Point Index <span class="text-danger">*</span></label>
+                                <input type="number" id="edit_dnp3_addr" class="form-control" placeholder="e.g., 0">
+                            </div>
+                            <div class="col">
+                                <label class="small">Icon</label>
+                                <select id="edit_dnp3_icon" class="form-select">
+                                    <option value="fa-thermometer-half">Temperature</option>
+                                    <option value="fa-fan">Fan</option>
+                                    <option value="fa-lightbulb">Light</option>
+                                    <option value="fa-gauge">Pressure</option>
+                                    <option value="fa-droplet">Humidity</option>
+                                    <option value="fa-bolt">Power</option>
+                                    <option value="fa-water">Flow/Water</option>
+                                    <option value="fa-gears">Motor/Drive</option>
+                                    <option value="fa-industry">Industrial</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="row mb-2">
+                            <div class="col">
+                                <label class="small fw-bold">DNP3 IP</label>
+                                <input type="text" id="edit_dnp3_ip" class="form-control">
+                            </div>
+                            <div class="col">
+                                <label class="small fw-bold">DNP3 Port</label>
+                                <input type="number" id="edit_dnp3_port" class="form-control">
+                            </div>
+                        </div>
+                        <div class="row mb-2">
+                            <div class="col">
+                                <label class="small fw-bold">Outstation Address</label>
+                                <input type="number" id="edit_dnp3_outstation_address" class="form-control">
+                            </div>
+                            <div class="col">
+                                <label class="small fw-bold">Master Address</label>
+                                <input type="number" id="edit_dnp3_master_address" class="form-control">
+                            </div>
+                        </div>
+                        <div class="row mb-2">
+                            <div class="col">
+                                <label class="small fw-bold">Point Class</label>
+                                <select id="edit_dnp3_point_class" class="form-select">
+                                    <option value="analog_output">Analog Output (R/W)</option>
+                                    <option value="analog_input">Analog Input (R)</option>
+                                    <option value="binary_output">Binary Output (R/W)</option>
+                                    <option value="binary_input">Binary Input (R)</option>
+                                </select>
+                            </div>
+                            <div class="col">
+                                <label class="small fw-bold">Event Class</label>
+                                <select id="edit_dnp3_event_class" class="form-select">
+                                    <option value="1">Class 1</option>
+                                    <option value="2">Class 2</option>
+                                    <option value="3">Class 3</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="mb-2">
+                            <label class="small fw-bold">Static Variation</label>
+                            <input type="number" id="edit_dnp3_static_variation" class="form-control">
                         </div>
                     </div>
 

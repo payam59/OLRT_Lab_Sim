@@ -72,7 +72,7 @@ class BBMDIn(BaseModel):
 
 class AssetIn(BaseModel):
     name: str
-    type: str
+    type: Optional[str] = "General"
     sub_type: str
     protocol: str
     address: int
@@ -267,12 +267,27 @@ async def get_alarms(active_only: int = 1):
 
 @app.get("/api/bacnet/status")
 async def get_bacnet_status():
+    object_details_fn = getattr(bacnet_manager, "object_details", None)
+    if callable(object_details_fn):
+        try:
+            registered_objects = object_details_fn()
+        except Exception as exc:
+            registered_objects = []
+            bacnet_manager.bbmd_status.setdefault("_status_api", {})
+            bacnet_manager.bbmd_status["_status_api"] = {
+                "running": False,
+                "message": f"object_details failed: {exc}",
+            }
+    else:
+        registered_objects = []
+
     return {
         "bac0_installed": BAC0 is not None,
         "bac0_import_error": BAC0_IMPORT_ERROR,
         "running_bbmd_ids": list(bacnet_manager.bbmd_instances.keys()),
         "bbmd_status": bacnet_manager.bbmd_status,
         "registered_object_names": list(bacnet_manager.objects.keys()),
+        "registered_objects": registered_objects,
     }
 
 
@@ -330,7 +345,7 @@ async def add_asset(asset: AssetIn):
             """,
             (
                 cleaned_name,
-                asset.type,
+                asset.type or "General",
                 asset.sub_type,
                 asset.protocol,
                 asset.address,
@@ -399,7 +414,7 @@ async def update_asset(name: str, asset: AssetIn):
             WHERE name = ?
             """,
             (
-                asset.type,
+                asset.type or "General",
                 asset.sub_type,
                 asset.protocol,
                 asset.address,
@@ -463,30 +478,14 @@ async def delete_asset(name: str):
 @app.put("/api/override/{name}")
 async def override(name: str, value: float):
     conn = get_db_connection()
-    asset_row = None
     try:
-        cursor = conn.execute(
+        conn.execute(
             "UPDATE assets SET current_value = ?, manual_override = 1 WHERE name = ?",
             (value, name),
         )
-        if cursor.rowcount == 0:
-            raise HTTPException(status_code=404, detail="Asset not found")
-
-        asset_row = conn.execute("SELECT * FROM assets WHERE name = ?", (name,)).fetchone()
         conn.commit()
     finally:
         _close_connection(conn)
-
-    if asset_row:
-        asset_dict = dict(asset_row)
-        if asset_dict.get("protocol") == "bacnet":
-            bacnet_manager.update_value(
-                asset_dict["name"],
-                asset_dict["current_value"],
-                asset_dict.get("sub_type", "Analog"),
-            )
-        elif asset_dict.get("protocol") == "modbus":
-            modbus_manager.write_value(asset_dict)
 
     return {"status": "locked"}
 

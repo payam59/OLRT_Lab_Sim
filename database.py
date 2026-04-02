@@ -56,6 +56,13 @@ def init_db():
             modbus_alarm_bit INTEGER DEFAULT 0,
             modbus_zero_based INTEGER DEFAULT 1,
             modbus_word_order TEXT DEFAULT 'low_high',
+            dnp3_ip TEXT DEFAULT '0.0.0.0',
+            dnp3_port INTEGER DEFAULT 20000,
+            dnp3_outstation_address INTEGER DEFAULT 10,
+            dnp3_master_address INTEGER DEFAULT 1,
+            dnp3_point_class TEXT DEFAULT 'analog_output',
+            dnp3_event_class INTEGER DEFAULT 1,
+            dnp3_static_variation INTEGER DEFAULT 0,
             alarm_state INTEGER DEFAULT 0,
             alarm_message TEXT,
             FOREIGN KEY (bbmd_id) REFERENCES bbmd(id) ON DELETE SET NULL
@@ -99,6 +106,13 @@ def init_db():
         'modbus_alarm_bit': 'INTEGER DEFAULT 0',
         'modbus_zero_based': 'INTEGER DEFAULT 1',
         'modbus_word_order': 'TEXT DEFAULT "low_high"',
+        'dnp3_ip': 'TEXT DEFAULT "0.0.0.0"',
+        'dnp3_port': 'INTEGER DEFAULT 20000',
+        'dnp3_outstation_address': 'INTEGER DEFAULT 10',
+        'dnp3_master_address': 'INTEGER DEFAULT 1',
+        'dnp3_point_class': 'TEXT DEFAULT "analog_output"',
+        'dnp3_event_class': 'INTEGER DEFAULT 1',
+        'dnp3_static_variation': 'INTEGER DEFAULT 0',
         'alarm_state': 'INTEGER DEFAULT 0',
         'alarm_message': 'TEXT'
     }
