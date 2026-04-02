@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from collections import defaultdict
 
 
@@ -13,6 +14,8 @@ class DNP3RuntimeManager:
     """
 
     def __init__(self):
+        self.server_tasks: dict[tuple[str, int], asyncio.Task] = {}
+        self.servers: dict[tuple[str, int], asyncio.base_events.Server] = {}
         self.endpoint_assets: dict[tuple[str, int], set[str]] = defaultdict(set)
         self.asset_index: dict[str, dict] = {}
         self.point_values: dict[str, float] = {}
@@ -29,9 +32,82 @@ class DNP3RuntimeManager:
         # Transport backend can be introduced later while preserving API shape.
         return True
 
+    @staticmethod
+    def _dnp_crc(data: bytes) -> bytes:
+        crc = 0
+        for value in data:
+            crc ^= value
+            for _ in range(8):
+                if crc & 0x0001:
+                    crc = (crc >> 1) ^ 0xA6BC
+                else:
+                    crc >>= 1
+        crc = (~crc) & 0xFFFF
+        return bytes((crc & 0xFF, (crc >> 8) & 0xFF))
+
+    def _build_link_response(self, src_outstation: int, dest_master: int, function: int = 0x0B) -> bytes:
+        ctrl = 0x80 | (function & 0x0F)  # secondary frame, response from outstation
+        header_without_crc = bytes(
+            [
+                0x05,
+                0x64,
+                0x05,  # length for control+dest+src
+                ctrl,
+                dest_master & 0xFF,
+                (dest_master >> 8) & 0xFF,
+                src_outstation & 0xFF,
+                (src_outstation >> 8) & 0xFF,
+            ]
+        )
+        crc = self._dnp_crc(header_without_crc[3:8])
+        return header_without_crc + crc
+
+    async def _handle_client(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
+        endpoint = writer.get_extra_info("sockname")
+        endpoint_key = f"{endpoint[0]}:{endpoint[1]}" if endpoint else "unknown"
+        self.status_messages[endpoint_key] = "connected"
+        try:
+            while True:
+                data = await reader.read(4096)
+                if not data:
+                    break
+                # Basic link-layer response support for DNP3 TCP keepalive/link requests.
+                if len(data) >= 10 and data[0] == 0x05 and data[1] == 0x64:
+                    control = data[3]
+                    dest = data[4] | (data[5] << 8)
+                    src = data[6] | (data[7] << 8)
+                    is_primary = bool(control & 0x40)
+                    function = control & 0x0F
+                    if is_primary:
+                        if function == 0x09:  # request link status
+                            writer.write(self._build_link_response(dest, src, 0x0B))
+                        else:
+                            writer.write(self._build_link_response(dest, src, 0x00))  # ACK
+                        await writer.drain()
+        except Exception:
+            pass
+        finally:
+            self.status_messages[endpoint_key] = "running"
+            writer.close()
+            await writer.wait_closed()
+
+    async def _serve_endpoint(self, endpoint: tuple[str, int]):
+        ip, port = endpoint
+        server = await asyncio.start_server(self._handle_client, host=ip, port=port)
+        self.servers[endpoint] = server
+        self.status_messages[f"{ip}:{port}"] = "running"
+        async with server:
+            await server.serve_forever()
+
     async def ensure_endpoint(self, ip: str, port: int):
         endpoint_key = f"{ip}:{port}"
-        self.status_messages[endpoint_key] = "running"
+        endpoint = (ip, port)
+        if endpoint in self.server_tasks:
+            self.status_messages[endpoint_key] = "running"
+            return
+        task = asyncio.create_task(self._serve_endpoint(endpoint))
+        self.server_tasks[endpoint] = task
+        self.status_messages[endpoint_key] = "starting"
 
     async def register_asset(self, asset: dict):
         name = asset["name"]
@@ -74,6 +150,12 @@ class DNP3RuntimeManager:
         self.endpoint_assets[endpoint].discard(name)
         if not self.endpoint_assets[endpoint]:
             self.endpoint_assets.pop(endpoint, None)
+            server = self.servers.pop(endpoint, None)
+            if server:
+                server.close()
+            task = self.server_tasks.pop(endpoint, None)
+            if task:
+                task.cancel()
             self.status_messages[f"{endpoint[0]}:{endpoint[1]}"] = "stopped"
 
     def write_value(self, asset: dict):
@@ -100,6 +182,12 @@ class DNP3RuntimeManager:
     async def shutdown(self):
         for name in list(self.asset_index.keys()):
             await self.unregister_asset(name)
+        for endpoint, server in list(self.servers.items()):
+            server.close()
+            self.servers.pop(endpoint, None)
+        for endpoint, task in list(self.server_tasks.items()):
+            task.cancel()
+            self.server_tasks.pop(endpoint, None)
         self.endpoint_assets.clear()
         self.asset_index.clear()
         self.point_values.clear()
@@ -107,8 +195,8 @@ class DNP3RuntimeManager:
     def status(self):
         return {
             "dnp3_runtime_ready": self.installed,
-            "transport_mode": "in_process_simulation",
-            "transport_note": "No wire-level DNP3 outstation stack is active in this runtime.",
+            "transport_mode": "tcp_listener_partial_dnp3",
+            "transport_note": "TCP listener with basic DNP3 link-layer responses; full outstation application layer is limited.",
             "endpoints": [f"{ip}:{port}" for ip, port in self.endpoint_assets.keys()],
             "asset_count": len(self.asset_index),
             "status_messages": self.status_messages,
