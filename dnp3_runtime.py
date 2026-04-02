@@ -59,7 +59,7 @@ class DNP3RuntimeManager:
             "master_address": int(1 if master_address is None else master_address),
             "event_class": int(asset.get("dnp3_event_class") or 1),
             "static_variation": int(asset.get("dnp3_static_variation") or 0),
-            "kepware_address": f"{profile['group']}.{profile['variation']}.{point_index}.Val",
+            "kepware_address": f"{profile['group']}.{profile['variation']}.{point_index}.Value",
         }
         self.endpoint_assets[endpoint].add(name)
         self.point_values[name] = float(asset.get("current_value") or 0.0)
