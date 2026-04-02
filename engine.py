@@ -21,7 +21,7 @@ def check_alarm_condition(asset_dict):
     return False, None
 
 
-async def simulation_loop(modbus_block, bacnet_manager, ws_manager=None):
+async def simulation_loop(modbus_block, bacnet_manager, ws_manager=None, dnp3_manager=None):
     while True:
         conn = None
         try:
@@ -52,6 +52,16 @@ async def simulation_loop(modbus_block, bacnet_manager, ws_manager=None):
                 elif asset_dict['protocol'] == "modbus" and modbus_block:
                     if asset_dict.get('modbus_register_type') in ['holding', 'coil']:
                         remote_val = modbus_block.read_remote_value(asset_dict)
+                        if remote_val is not None and abs(remote_val - original_value) > 0.01:
+                            cursor.execute("UPDATE assets SET current_value = ?, manual_override = 1 WHERE id = ?",
+                                           (remote_val, asset_dict['id']))
+                            asset_dict['current_value'] = remote_val
+                            asset_dict['manual_override'] = 1
+                            asset_changed = True
+                elif asset_dict['protocol'] == "dnp3" and dnp3_manager:
+                    point_class = (asset_dict.get('dnp3_point_class') or '').lower()
+                    if point_class in ['analog_output', 'binary_output']:
+                        remote_val = dnp3_manager.read_remote_value(asset_dict)
                         if remote_val is not None and abs(remote_val - original_value) > 0.01:
                             cursor.execute("UPDATE assets SET current_value = ?, manual_override = 1 WHERE id = ?",
                                            (remote_val, asset_dict['id']))
@@ -124,6 +134,11 @@ async def simulation_loop(modbus_block, bacnet_manager, ws_manager=None):
                     # For writable points we only push when simulator/alarm state changed.
                     if asset_changed or alarm_changed or not writable:
                         modbus_block.write_value(asset_dict)
+                elif asset_dict['protocol'] == "dnp3" and dnp3_manager:
+                    point_class = (asset_dict.get('dnp3_point_class') or '').lower()
+                    writable = point_class in ['analog_output', 'binary_output']
+                    if asset_changed or alarm_changed or not writable:
+                        dnp3_manager.write_value(asset_dict)
 
                 updated_assets.append(asset_dict)
                 if asset_changed:
