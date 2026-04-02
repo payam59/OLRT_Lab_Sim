@@ -463,14 +463,30 @@ async def delete_asset(name: str):
 @app.put("/api/override/{name}")
 async def override(name: str, value: float):
     conn = get_db_connection()
+    asset_row = None
     try:
-        conn.execute(
+        cursor = conn.execute(
             "UPDATE assets SET current_value = ?, manual_override = 1 WHERE name = ?",
             (value, name),
         )
+        if cursor.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Asset not found")
+
+        asset_row = conn.execute("SELECT * FROM assets WHERE name = ?", (name,)).fetchone()
         conn.commit()
     finally:
         _close_connection(conn)
+
+    if asset_row:
+        asset_dict = dict(asset_row)
+        if asset_dict.get("protocol") == "bacnet":
+            bacnet_manager.update_value(
+                asset_dict["name"],
+                asset_dict["current_value"],
+                asset_dict.get("sub_type", "Analog"),
+            )
+        elif asset_dict.get("protocol") == "modbus":
+            modbus_manager.write_value(asset_dict)
 
     return {"status": "locked"}
 
