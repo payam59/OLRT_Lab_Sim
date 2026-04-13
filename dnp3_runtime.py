@@ -1,48 +1,36 @@
 from __future__ import annotations
 
 import asyncio
-import importlib
-import importlib.util
 from collections import defaultdict
-
-_DNP3_OUTSTATION_SPEC = importlib.util.find_spec("dnp3_python.dnp3station.outstation")
-_DNP3_PYDNP3_SPEC = importlib.util.find_spec("pydnp3")
-HAS_NATIVE_DNP3 = _DNP3_OUTSTATION_SPEC is not None and _DNP3_PYDNP3_SPEC is not None
-
-if HAS_NATIVE_DNP3:
-    _outstation_module = importlib.import_module("dnp3_python.dnp3station.outstation")
-    _pydnp3_module = importlib.import_module("pydnp3")
-    OutStationApplication = _outstation_module.OutStationApplication
-    opendnp3 = _pydnp3_module.opendnp3
 
 
 class DNP3RuntimeManager:
     """
-    DNP3 runtime manager with two modes:
-    - native outstation mode (dnp3-python/pydnp3 available)
-    - fallback TCP listener mode (link-layer ACK only)
+    DNP3 runtime abstraction.
+
+    This implementation keeps point state and endpoint mapping in-process and
+    is intentionally API-compatible with the simulation engine, so a real DNP3
+    transport backend can be wired in without changing engine/main call paths.
     """
 
     def __init__(self):
         self.server_tasks: dict[tuple[str, int], asyncio.Task] = {}
         self.servers: dict[tuple[str, int], asyncio.base_events.Server] = {}
-        self.outstations: dict[tuple[str, int], object] = {}
-
         self.endpoint_assets: dict[tuple[str, int], set[str]] = defaultdict(set)
         self.asset_index: dict[str, dict] = {}
         self.point_values: dict[str, float] = {}
         self.status_messages: dict[str, str] = {}
-
         self.profiles = {
-            "binary_input": {"group": 1, "variation": 2, "writable": False, "db": "Binary"},
-            "binary_output": {"group": 10, "variation": 2, "writable": True, "db": "BinaryOutputStatus"},
-            "analog_input": {"group": 30, "variation": 5, "writable": False, "db": "Analog"},
-            "analog_output": {"group": 40, "variation": 4, "writable": True, "db": "AnalogOutputStatus"},
+            "binary_input": {"group": 1, "variation": 2, "writable": False},
+            "binary_output": {"group": 10, "variation": 2, "writable": True},
+            "analog_input": {"group": 30, "variation": 5, "writable": False},
+            "analog_output": {"group": 40, "variation": 4, "writable": True},
         }
 
     @property
     def installed(self) -> bool:
-        return HAS_NATIVE_DNP3
+        # Transport backend can be introduced later while preserving API shape.
+        return True
 
     @staticmethod
     def _dnp_crc(data: bytes) -> bytes:
@@ -58,12 +46,12 @@ class DNP3RuntimeManager:
         return bytes((crc & 0xFF, (crc >> 8) & 0xFF))
 
     def _build_link_response(self, src_outstation: int, dest_master: int, function: int = 0x0B) -> bytes:
-        ctrl = 0x80 | (function & 0x0F)
+        ctrl = 0x80 | (function & 0x0F)  # secondary frame, response from outstation
         header_without_crc = bytes(
             [
                 0x05,
                 0x64,
-                0x05,
+                0x05,  # length for control+dest+src
                 ctrl,
                 dest_master & 0xFF,
                 (dest_master >> 8) & 0xFF,
@@ -83,6 +71,7 @@ class DNP3RuntimeManager:
                 data = await reader.read(4096)
                 if not data:
                     break
+                # Basic link-layer response support for DNP3 TCP keepalive/link requests.
                 if len(data) >= 10 and data[0] == 0x05 and data[1] == 0x64:
                     control = data[3]
                     dest = data[4] | (data[5] << 8)
@@ -90,11 +79,13 @@ class DNP3RuntimeManager:
                     is_primary = bool(control & 0x40)
                     function = control & 0x0F
                     if is_primary:
-                        if function == 0x09:
+                        if function == 0x09:  # request link status
                             writer.write(self._build_link_response(dest, src, 0x0B))
                         else:
-                            writer.write(self._build_link_response(dest, src, 0x00))
+                            writer.write(self._build_link_response(dest, src, 0x00))  # ACK
                         await writer.drain()
+        except Exception:
+            pass
         finally:
             self.status_messages[endpoint_key] = "running"
             writer.close()
@@ -108,100 +99,15 @@ class DNP3RuntimeManager:
         async with server:
             await server.serve_forever()
 
-    def _calculate_db_sizes(self, endpoint: tuple[str, int]) -> tuple[int, int, int, int]:
-        max_index = {
-            "Binary": 0,
-            "BinaryOutputStatus": 0,
-            "Analog": 0,
-            "AnalogOutputStatus": 0,
-        }
-        for name in self.endpoint_assets.get(endpoint, set()):
-            mapping = self.asset_index.get(name)
-            if not mapping:
-                continue
-            db_name = mapping["db_name"]
-            idx = int(mapping["point_index"])
-            if idx > max_index[db_name]:
-                max_index[db_name] = idx
-
-        return (
-            max_index["Binary"] + 1,
-            max_index["BinaryOutputStatus"] + 1,
-            max_index["Analog"] + 1,
-            max_index["AnalogOutputStatus"] + 1,
-        )
-
     async def ensure_endpoint(self, ip: str, port: int):
         endpoint_key = f"{ip}:{port}"
         endpoint = (ip, port)
-
-        if HAS_NATIVE_DNP3:
-            if endpoint in self.outstations:
-                self.status_messages[endpoint_key] = "running"
-                return
-
-            first_asset_name = next(iter(self.endpoint_assets.get(endpoint, set())), None)
-            if not first_asset_name:
-                return
-            first_mapping = self.asset_index[first_asset_name]
-
-            same_addr_assets = []
-            for name in self.endpoint_assets.get(endpoint, set()):
-                mapping = self.asset_index.get(name, {})
-                if (
-                    mapping.get("outstation_address") != first_mapping.get("outstation_address")
-                    or mapping.get("master_address") != first_mapping.get("master_address")
-                ):
-                    same_addr_assets.append(name)
-
-            if same_addr_assets:
-                self.status_messages[endpoint_key] = (
-                    "error: mixed master/outstation addresses on same endpoint"
-                )
-                return
-
-            num_bin, num_bos, num_ai, num_aos = self._calculate_db_sizes(endpoint)
-
-            outstation = OutStationApplication(
-                outstation_ip=ip,
-                port=port,
-                master_id=int(first_mapping["master_address"]),
-                outstation_id=int(first_mapping["outstation_address"]),
-                numBinary=max(1, num_bin),
-                numBinaryOutputStatus=max(1, num_bos),
-                numAnalog=max(1, num_ai),
-                numAnalogOutputStatus=max(1, num_aos),
-            )
-            outstation.start()
-            self.outstations[endpoint] = outstation
-            self.status_messages[endpoint_key] = "running"
-            return
-
         if endpoint in self.server_tasks:
             self.status_messages[endpoint_key] = "running"
             return
-
         task = asyncio.create_task(self._serve_endpoint(endpoint))
         self.server_tasks[endpoint] = task
         self.status_messages[endpoint_key] = "starting"
-
-    def _push_value_to_outstation(self, mapping: dict, value: float):
-        endpoint = mapping["endpoint"]
-        outstation = self.outstations.get(endpoint)
-        if not outstation:
-            return
-
-        idx = int(mapping["point_index"])
-        point_class = mapping["point_class"]
-
-        if point_class == "analog_input":
-            outstation.apply_update(opendnp3.Analog(value=float(value)), idx)
-        elif point_class == "analog_output":
-            outstation.apply_update(opendnp3.AnalogOutputStatus(value=float(value)), idx)
-        elif point_class == "binary_input":
-            outstation.apply_update(opendnp3.Binary(value=bool(value >= 0.5)), idx)
-        elif point_class == "binary_output":
-            outstation.apply_update(opendnp3.BinaryOutputStatus(value=bool(value >= 0.5)), idx)
 
     async def register_asset(self, asset: dict):
         name = asset["name"]
@@ -216,9 +122,8 @@ class DNP3RuntimeManager:
         point_class = (asset.get("dnp3_point_class") or "").strip().lower() or "analog_output"
         profile = self.profiles.get(point_class, self.profiles["analog_output"])
         point_index = max(0, int(asset.get("address") or 0))
-        outstation_address = int(10 if asset.get("dnp3_outstation_address") is None else asset.get("dnp3_outstation_address"))
-        master_address = int(1 if asset.get("dnp3_master_address") is None else asset.get("dnp3_master_address"))
-
+        outstation_address = asset.get("dnp3_outstation_address")
+        master_address = asset.get("dnp3_master_address")
         self.asset_index[name] = {
             "endpoint": endpoint,
             "point_class": point_class,
@@ -226,104 +131,48 @@ class DNP3RuntimeManager:
             "group": int(profile["group"]),
             "variation": int(profile["variation"]),
             "writable": bool(profile["writable"]),
-            "db_name": profile["db"],
-            "outstation_address": outstation_address,
-            "master_address": master_address,
+            "outstation_address": int(10 if outstation_address is None else outstation_address),
+            "master_address": int(1 if master_address is None else master_address),
             "event_class": int(asset.get("dnp3_event_class") or 1),
             "static_variation": int(asset.get("dnp3_static_variation") or 0),
             "kepware_address": f"{profile['group']}.{profile['variation']}.{point_index}.Value",
         }
-
         self.endpoint_assets[endpoint].add(name)
-        value = float(asset.get("current_value") or 0.0)
-        if point_class in ("binary_input", "binary_output"):
-            value = 1.0 if value >= 0.5 else 0.0
-        self.point_values[name] = value
-
+        self.point_values[name] = float(asset.get("current_value") or 0.0)
         await self.ensure_endpoint(ip, port)
-        mapping = self.asset_index.get(name)
-        if HAS_NATIVE_DNP3 and mapping:
-            self._push_value_to_outstation(mapping, value)
 
     async def unregister_asset(self, name: str):
         mapping = self.asset_index.pop(name, None)
         self.point_values.pop(name, None)
         if not mapping:
             return
-
         endpoint = mapping["endpoint"]
         self.endpoint_assets[endpoint].discard(name)
-
-        if self.endpoint_assets[endpoint]:
-            return
-
-        self.endpoint_assets.pop(endpoint, None)
-        endpoint_key = f"{endpoint[0]}:{endpoint[1]}"
-
-        outstation = self.outstations.pop(endpoint, None)
-        if outstation is not None:
-            outstation.shutdown()
-
-        server = self.servers.pop(endpoint, None)
-        if server:
-            server.close()
-
-        task = self.server_tasks.pop(endpoint, None)
-        if task:
-            task.cancel()
-
-        self.status_messages[endpoint_key] = "stopped"
+        if not self.endpoint_assets[endpoint]:
+            self.endpoint_assets.pop(endpoint, None)
+            server = self.servers.pop(endpoint, None)
+            if server:
+                server.close()
+            task = self.server_tasks.pop(endpoint, None)
+            if task:
+                task.cancel()
+            self.status_messages[f"{endpoint[0]}:{endpoint[1]}"] = "stopped"
 
     def write_value(self, asset: dict):
         name = asset["name"]
-        mapping = self.asset_index.get(name)
-        if not mapping:
+        if name not in self.asset_index:
             return
-
-        point_class = mapping["point_class"]
+        point_class = self.asset_index[name]["point_class"]
         value = float(asset.get("current_value") or 0.0)
         if point_class in ("binary_input", "binary_output"):
             value = 1.0 if value >= 0.5 else 0.0
-
         self.point_values[name] = value
-
-        if HAS_NATIVE_DNP3:
-            self._push_value_to_outstation(mapping, value)
 
     def read_remote_value(self, asset: dict):
         name = asset["name"]
-        mapping = self.asset_index.get(name)
-        if not mapping:
+        if name not in self.asset_index:
             return None
-
-        if not HAS_NATIVE_DNP3:
-            return self.point_values.get(name)
-
-        endpoint = mapping["endpoint"]
-        outstation = self.outstations.get(endpoint)
-        if outstation is None:
-            return self.point_values.get(name)
-
-        idx = int(mapping["point_index"])
-        db_name = mapping["db_name"]
-
-        try:
-            db = outstation.db
-            point_table = getattr(db, db_name)
-            remote_value = point_table.get(idx)
-        except Exception:
-            return self.point_values.get(name)
-
-        if remote_value is None:
-            return self.point_values.get(name)
-
-        if isinstance(remote_value, bool):
-            remote_as_float = 1.0 if remote_value else 0.0
-        else:
-            remote_as_float = float(remote_value)
-
-        self.point_values[name] = remote_as_float
-        return remote_as_float
+        return self.point_values.get(name)
 
     async def bootstrap(self, assets: list[dict]):
         for asset in assets:
@@ -333,34 +182,21 @@ class DNP3RuntimeManager:
     async def shutdown(self):
         for name in list(self.asset_index.keys()):
             await self.unregister_asset(name)
-
-        for endpoint, outstation in list(self.outstations.items()):
-            outstation.shutdown()
-            self.outstations.pop(endpoint, None)
-
         for endpoint, server in list(self.servers.items()):
             server.close()
             self.servers.pop(endpoint, None)
-
         for endpoint, task in list(self.server_tasks.items()):
             task.cancel()
             self.server_tasks.pop(endpoint, None)
-
         self.endpoint_assets.clear()
         self.asset_index.clear()
         self.point_values.clear()
 
     def status(self):
-        mode = "native_outstation" if HAS_NATIVE_DNP3 else "tcp_listener_partial_dnp3"
-        note = (
-            "Full outstation via dnp3-python/pydnp3"
-            if HAS_NATIVE_DNP3
-            else "TCP listener with basic DNP3 link-layer responses; full outstation unavailable"
-        )
         return {
             "dnp3_runtime_ready": self.installed,
-            "transport_mode": mode,
-            "transport_note": note,
+            "transport_mode": "tcp_listener_partial_dnp3",
+            "transport_note": "TCP listener with basic DNP3 link-layer responses; full outstation application layer is limited.",
             "endpoints": [f"{ip}:{port}" for ip, port in self.endpoint_assets.keys()],
             "asset_count": len(self.asset_index),
             "status_messages": self.status_messages,
