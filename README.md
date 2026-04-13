@@ -95,6 +95,13 @@ OLRT_Lab_Sim (Online Real-Time Lab Simulation) is a FastAPI-based industrial ass
    ```bash
    pip install fastapi uvicorn jinja2 pydantic pymodbus BAC0 bacpypes3
    ```
+4. **(Optional, recommended for full DNP3 simulation) Install VOLTTRON dnp3-python from GitHub**
+   ```bash
+   pip install git+https://github.com/VOLTTRON/dnp3-python.git
+   ```
+   Notes:
+   - Linux/Windows builds may require a C/C++ build toolchain and CMake.
+   - Without native bindings, DNP3 runtime stays disabled and reports an install hint in `/api/dnp3/status`.
 
 ## Running the application
 ```bash

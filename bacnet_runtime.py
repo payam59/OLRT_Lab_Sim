@@ -1,4 +1,6 @@
 from __future__ import annotations
+import asyncio
+import inspect
 import json
 
 BAC0_IMPORT_ERROR = None
@@ -23,6 +25,7 @@ class BACnetManager:
         self.asset_to_bbmd = {}
         self.object_meta = {}
         self.bbmd_status = {}
+        self.bbmd_start_tasks = {}
 
     def _get_object_class(self, sub_type, object_type):
         if sub_type == "Digital":
@@ -41,30 +44,60 @@ class BACnetManager:
     def start_bbmd(self, bbmd):
         bbmd_id = bbmd["id"]
         self.bbmd_config[bbmd_id] = dict(bbmd)
-        if bbmd_id in self.bbmd_instances:
+        if bbmd_id in self.bbmd_instances or bbmd_id in self.bbmd_start_tasks:
             return
         if not BAC0:
             self.bbmd_status[bbmd_id] = {"running": False, "message": "BAC0 is not installed in the runtime environment."}
             return
+
+        lite_args = dict(port=bbmd["port"], deviceId=bbmd["device_id"], localObjName=bbmd["name"])
+        ip_address = (bbmd.get("ip_address") or "").strip()
+        if ip_address and ip_address != "0.0.0.0":
+            lite_args["ip"] = ip_address
+
         try:
-            lite_args = dict(port=bbmd["port"], deviceId=bbmd["device_id"], localObjName=bbmd["name"])
-            ip_address = (bbmd.get("ip_address") or "").strip()
-            if ip_address and ip_address != "0.0.0.0":
-                lite_args["ip"] = ip_address
-            stack = BAC0.lite(**lite_args)
-            self.bbmd_instances[bbmd_id] = stack
+            stack_or_coro = BAC0.lite(**lite_args)
+            if inspect.isawaitable(stack_or_coro):
+                try:
+                    loop = asyncio.get_running_loop()
+                except RuntimeError:
+                    self.bbmd_status[bbmd_id] = {"running": False, "message": "No running event loop available for async BAC0 startup."}
+                    return
+                task = loop.create_task(stack_or_coro)
+                self.bbmd_start_tasks[bbmd_id] = task
+                self.bbmd_status[bbmd_id] = {"running": False, "message": f"Starting BACnet stack on UDP {ip_address or 'auto-detected'}:{bbmd['port']}"}
+                task.add_done_callback(lambda t, _id=bbmd_id, _ip=ip_address, _port=bbmd["port"]: self._finalize_bbmd_start(_id, t, _ip, _port))
+                return
+
+            self.bbmd_instances[bbmd_id] = stack_or_coro
             self.bbmd_status[bbmd_id] = {"running": True, "message": f"Listening on UDP {ip_address or 'auto-detected'}:{bbmd['port']}"}
         except Exception as e:
             self.bbmd_status[bbmd_id] = {"running": False, "message": str(e)}
 
+    def _finalize_bbmd_start(self, bbmd_id, task, ip_address, port):
+        self.bbmd_start_tasks.pop(bbmd_id, None)
+        if task.cancelled():
+            self.bbmd_status[bbmd_id] = {"running": False, "message": "Startup cancelled"}
+            return
+        exc = task.exception()
+        if exc:
+            self.bbmd_status[bbmd_id] = {"running": False, "message": str(exc)}
+            return
+        stack = task.result()
+        self.bbmd_instances[bbmd_id] = stack
+        self.bbmd_status[bbmd_id] = {"running": True, "message": f"Listening on UDP {ip_address or 'auto-detected'}:{port}"}
+
     def stop_bbmd(self, bbmd_id):
+        task = self.bbmd_start_tasks.pop(bbmd_id, None)
+        if task:
+            task.cancel()
         if bbmd_id in self.bbmd_instances:
             try:
                 self.bbmd_instances[bbmd_id].disconnect()
                 del self.bbmd_instances[bbmd_id]
-                self.bbmd_status[bbmd_id] = {"running": False, "message": "Stopped"}
             except Exception:
                 pass
+        self.bbmd_status[bbmd_id] = {"running": False, "message": "Stopped"}
 
     def add_asset_to_bbmd(self, asset):
         if not BAC0:
