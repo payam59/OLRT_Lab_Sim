@@ -75,6 +75,7 @@ OLRT_Lab_Sim (Online Real-Time Lab Simulation) is a FastAPI-based industrial ass
   - `pymodbus`
   - `BAC0` (optional but required for BACnet runtime)
   - `bacpypes3` (BACnet dependency)
+  - `dnp3-python` (recommended for full DNP3 outstation support with Kepware)
 
 ## Setup
 1. **Clone repository**
