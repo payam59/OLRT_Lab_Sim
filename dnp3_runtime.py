@@ -1,20 +1,25 @@
 from __future__ import annotations
 
 import asyncio
+import importlib
+import importlib.util
 from collections import defaultdict
 
-from dnp3_stack import VOLTTRON_DNP3_GIT, load_native_bindings
+_DNP3_OUTSTATION_SPEC = importlib.util.find_spec("dnp3_python.dnp3station.outstation")
+_DNP3_PYDNP3_SPEC = importlib.util.find_spec("pydnp3")
+HAS_NATIVE_DNP3 = _DNP3_OUTSTATION_SPEC is not None and _DNP3_PYDNP3_SPEC is not None
 
-_NATIVE_BINDINGS = load_native_bindings()
-HAS_NATIVE_DNP3 = _NATIVE_BINDINGS.available
-OutStationApplication = _NATIVE_BINDINGS.outstation_application
-opendnp3 = _NATIVE_BINDINGS.opendnp3
+if HAS_NATIVE_DNP3:
+    _outstation_module = importlib.import_module("dnp3_python.dnp3station.outstation")
+    _pydnp3_module = importlib.import_module("pydnp3")
+    OutStationApplication = _outstation_module.OutStationApplication
+    opendnp3 = _pydnp3_module.opendnp3
 
 
 class DNP3RuntimeManager:
     """
     DNP3 runtime manager with two modes:
-    - native outstation mode using VOLTTRON dnp3-python bindings when available
+    - native outstation mode (optional native DNP3 bindings available)
     - fallback TCP listener mode (link-layer ACK only)
     """
 
@@ -172,9 +177,13 @@ class DNP3RuntimeManager:
             self.status_messages[endpoint_key] = "running"
             return
 
-        self.status_messages[endpoint_key] = (
-            "error: native DNP3 stack unavailable; install from GitHub for full outstation mode"
-        )
+        if endpoint in self.server_tasks:
+            self.status_messages[endpoint_key] = "running"
+            return
+
+        task = asyncio.create_task(self._serve_endpoint(endpoint))
+        self.server_tasks[endpoint] = task
+        self.status_messages[endpoint_key] = "starting"
 
     def _push_value_to_outstation(self, mapping: dict, value: float):
         endpoint = mapping["endpoint"]
@@ -344,20 +353,16 @@ class DNP3RuntimeManager:
         self.point_values.clear()
 
     def status(self):
-        mode = "native_outstation" if HAS_NATIVE_DNP3 else "native_required_not_installed"
+        mode = "native_outstation" if HAS_NATIVE_DNP3 else "tcp_listener_partial_dnp3"
         note = (
-            "Full outstation via VOLTTRON dnp3-python bindings"
+            "Full outstation via optional native DNP3 bindings"
             if HAS_NATIVE_DNP3
-            else "Native outstation required for Kepware interoperability; runtime disabled until bindings are installed"
-        )
-        install_hint = None if HAS_NATIVE_DNP3 else (
-            "Install native stack from GitHub: pip install " + VOLTTRON_DNP3_GIT
+            else "TCP listener with basic DNP3 link-layer responses; full outstation unavailable"
         )
         return {
             "dnp3_runtime_ready": self.installed,
             "transport_mode": mode,
             "transport_note": note,
-            "native_install_hint": install_hint,
             "endpoints": [f"{ip}:{port}" for ip, port in self.endpoint_assets.keys()],
             "asset_count": len(self.asset_index),
             "status_messages": self.status_messages,
