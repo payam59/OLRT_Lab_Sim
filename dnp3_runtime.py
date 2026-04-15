@@ -34,7 +34,7 @@ class DNP3RuntimeManager:
         self.status_messages: dict[str, str] = {}
 
         self.profiles = {
-            "binary_input": {"group": 1, "variation": 2, "writable": False, "db": "Binary"},
+            "binary_input": {"group": 1, "variation": 1, "writable": False, "db": "Binary"},
             "binary_output": {"group": 10, "variation": 2, "writable": True, "db": "BinaryOutputStatus"},
             "analog_input": {"group": 30, "variation": 5, "writable": False, "db": "Analog"},
             "analog_output": {"group": 40, "variation": 4, "writable": True, "db": "AnalogOutputStatus"},
