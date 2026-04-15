@@ -1,6 +1,5 @@
 import sqlite3
 import os
-import time
 
 DB_FILE = "lab_assets.db"
 LOG_DIR = "simulation_logs"
