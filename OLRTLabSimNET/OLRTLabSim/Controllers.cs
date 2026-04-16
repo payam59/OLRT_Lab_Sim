@@ -366,6 +366,14 @@ namespace OLRTLabSim.Controllers
             else if (existing.Protocol == "dnp3")
                 await _dnp3Manager.UnregisterAsset(name);
 
+            var resolvedDnp3Ip = string.IsNullOrWhiteSpace(asset.Dnp3Ip) ? existing.Dnp3Ip : asset.Dnp3Ip;
+            var resolvedDnp3Port = asset.Dnp3Port > 0 ? asset.Dnp3Port : existing.Dnp3Port;
+            var resolvedDnp3OutstationAddress = asset.Dnp3OutstationAddress > 0 ? asset.Dnp3OutstationAddress : existing.Dnp3OutstationAddress;
+            var resolvedDnp3MasterAddress = asset.Dnp3MasterAddress > 0 ? asset.Dnp3MasterAddress : existing.Dnp3MasterAddress;
+            var resolvedDnp3PointClass = string.IsNullOrWhiteSpace(asset.Dnp3PointClass) ? existing.Dnp3PointClass : asset.Dnp3PointClass;
+            var resolvedDnp3EventClass = asset.Dnp3EventClass > 0 ? asset.Dnp3EventClass : existing.Dnp3EventClass;
+            var resolvedDnp3StaticVariation = asset.Dnp3StaticVariation >= 0 ? asset.Dnp3StaticVariation : existing.Dnp3StaticVariation;
+
             using var conn = Database.GetConnection();
             using var cmd = conn.CreateCommand();
             string normType = (asset.Protocol == "bacnet" ? asset.ObjectType : "value");
@@ -408,13 +416,13 @@ namespace OLRTLabSim.Controllers
             cmd.Parameters.AddWithValue("@p24", asset.ModbusPort > 0 ? asset.ModbusPort : 5020);
             cmd.Parameters.AddWithValue("@p25", asset.ModbusAlarmAddress ?? (object)DBNull.Value);
             cmd.Parameters.AddWithValue("@p26", asset.ModbusAlarmBit);
-            cmd.Parameters.AddWithValue("@p27", (object)(asset.Dnp3Ip ?? "0.0.0.0"));
-            cmd.Parameters.AddWithValue("@p28", asset.Dnp3Port > 0 ? asset.Dnp3Port : 20000);
-            cmd.Parameters.AddWithValue("@p29", asset.Dnp3OutstationAddress > 0 ? asset.Dnp3OutstationAddress : 10);
-            cmd.Parameters.AddWithValue("@p30", asset.Dnp3MasterAddress > 0 ? asset.Dnp3MasterAddress : 1);
-            cmd.Parameters.AddWithValue("@p31", (object)(asset.Dnp3PointClass ?? "analog_output"));
-            cmd.Parameters.AddWithValue("@p32", asset.Dnp3EventClass > 0 ? asset.Dnp3EventClass : 1);
-            cmd.Parameters.AddWithValue("@p33", asset.Dnp3StaticVariation);
+            cmd.Parameters.AddWithValue("@p27", (object)(resolvedDnp3Ip ?? "0.0.0.0"));
+            cmd.Parameters.AddWithValue("@p28", resolvedDnp3Port > 0 ? resolvedDnp3Port : 20000);
+            cmd.Parameters.AddWithValue("@p29", resolvedDnp3OutstationAddress > 0 ? resolvedDnp3OutstationAddress : 10);
+            cmd.Parameters.AddWithValue("@p30", resolvedDnp3MasterAddress > 0 ? resolvedDnp3MasterAddress : 1);
+            cmd.Parameters.AddWithValue("@p31", (object)(resolvedDnp3PointClass ?? "analog_output"));
+            cmd.Parameters.AddWithValue("@p32", resolvedDnp3EventClass > 0 ? resolvedDnp3EventClass : 1);
+            cmd.Parameters.AddWithValue("@p33", resolvedDnp3StaticVariation);
 
             cmd.ExecuteNonQuery();
 

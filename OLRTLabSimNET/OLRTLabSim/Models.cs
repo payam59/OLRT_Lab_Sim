@@ -1,5 +1,6 @@
 #nullable disable
 using System;
+using System.Text.Json.Serialization;
 
 namespace OLRTLabSim.Models
 {
@@ -49,12 +50,19 @@ namespace OLRTLabSim.Models
         public long ModbusZeroBased { get; set; }
         public string ModbusWordOrder { get; set; }
 
+        [JsonPropertyName("dnp3_ip")]
         public string Dnp3Ip { get; set; }
+        [JsonPropertyName("dnp3_port")]
         public long Dnp3Port { get; set; }
+        [JsonPropertyName("dnp3_outstation_address")]
         public long Dnp3OutstationAddress { get; set; }
+        [JsonPropertyName("dnp3_master_address")]
         public long Dnp3MasterAddress { get; set; }
+        [JsonPropertyName("dnp3_point_class")]
         public string Dnp3PointClass { get; set; }
+        [JsonPropertyName("dnp3_event_class")]
         public long Dnp3EventClass { get; set; }
+        [JsonPropertyName("dnp3_static_variation")]
         public long Dnp3StaticVariation { get; set; }
 
         public long AlarmState { get; set; }

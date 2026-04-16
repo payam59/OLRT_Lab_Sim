@@ -427,7 +427,11 @@ window.saveNewAsset = async function() {
 };
 
 window.openEditModal = async function(name) {
-    const res = await fetch(`/api/assets/${name}`);
+    const res = await fetch(`/api/assets/${encodeURIComponent(name)}`);
+    if (!res.ok) {
+        alert('Failed to load asset details for edit.');
+        return;
+    }
     const a = await res.json();
 
     document.getElementById('edit_name').value = a.name;
@@ -549,7 +553,7 @@ window.saveAssetEdit = async function() {
         return;
     }
 
-    const res = await fetch(`/api/assets/${name}`, {
+    const res = await fetch(`/api/assets/${encodeURIComponent(name)}`, {
         method: 'PUT',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify(data)
