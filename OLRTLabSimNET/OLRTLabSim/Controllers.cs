@@ -112,16 +112,16 @@ namespace OLRTLabSim.Controllers
 
             cmd.Parameters.Clear();
             cmd.Parameters.AddWithValue("@p1", asset.Name);
-            cmd.Parameters.AddWithValue("@p2", asset.Type ?? "General");
-            cmd.Parameters.AddWithValue("@p3", asset.SubType ?? "Analog");
-            cmd.Parameters.AddWithValue("@p4", asset.Protocol ?? "bacnet");
+            cmd.Parameters.AddWithValue("@p2", (object)(asset.Type ?? "General"));
+            cmd.Parameters.AddWithValue("@p3", (object)(asset.SubType ?? "Analog"));
+            cmd.Parameters.AddWithValue("@p4", (object)(asset.Protocol ?? "bacnet"));
             cmd.Parameters.AddWithValue("@p5", asset.Address);
             cmd.Parameters.AddWithValue("@p6", asset.MinRange);
             cmd.Parameters.AddWithValue("@p7", asset.MaxRange);
             cmd.Parameters.AddWithValue("@p8", asset.CurrentValue);
             cmd.Parameters.AddWithValue("@p9", asset.DriftRate);
-            cmd.Parameters.AddWithValue("@p10", asset.Icon);
-            cmd.Parameters.AddWithValue("@p11", asset.Filename);
+            cmd.Parameters.AddWithValue("@p10", asset.Icon ?? (object)DBNull.Value);
+            cmd.Parameters.AddWithValue("@p11", asset.Filename ?? (object)DBNull.Value);
             cmd.Parameters.AddWithValue("@p12", asset.BacnetPort > 0 ? asset.BacnetPort : 47808);
             cmd.Parameters.AddWithValue("@p13", asset.BacnetDeviceId > 0 ? asset.BacnetDeviceId : 1234);
             cmd.Parameters.AddWithValue("@p14", asset.IsNormallyOpen);
@@ -132,16 +132,16 @@ namespace OLRTLabSim.Controllers
             cmd.Parameters.AddWithValue("@p19", normType);
             cmd.Parameters.AddWithValue("@p20", string.IsNullOrWhiteSpace(asset.BacnetProperties) ? "{}" : asset.BacnetProperties);
             cmd.Parameters.AddWithValue("@p21", asset.ModbusUnitId > 0 ? asset.ModbusUnitId : 1);
-            cmd.Parameters.AddWithValue("@p22", asset.ModbusRegisterType ?? "holding");
-            cmd.Parameters.AddWithValue("@p23", asset.ModbusIp ?? "0.0.0.0");
+            cmd.Parameters.AddWithValue("@p22", (object)(asset.ModbusRegisterType ?? "holding"));
+            cmd.Parameters.AddWithValue("@p23", (object)(asset.ModbusIp ?? "0.0.0.0"));
             cmd.Parameters.AddWithValue("@p24", asset.ModbusPort > 0 ? asset.ModbusPort : 5020);
             cmd.Parameters.AddWithValue("@p25", asset.ModbusAlarmAddress ?? (object)DBNull.Value);
             cmd.Parameters.AddWithValue("@p26", asset.ModbusAlarmBit);
-            cmd.Parameters.AddWithValue("@p27", asset.Dnp3Ip ?? "0.0.0.0");
+            cmd.Parameters.AddWithValue("@p27", (object)(asset.Dnp3Ip ?? "0.0.0.0"));
             cmd.Parameters.AddWithValue("@p28", asset.Dnp3Port > 0 ? asset.Dnp3Port : 20000);
             cmd.Parameters.AddWithValue("@p29", asset.Dnp3OutstationAddress > 0 ? asset.Dnp3OutstationAddress : 10);
             cmd.Parameters.AddWithValue("@p30", asset.Dnp3MasterAddress > 0 ? asset.Dnp3MasterAddress : 1);
-            cmd.Parameters.AddWithValue("@p31", asset.Dnp3PointClass ?? "analog_output");
+            cmd.Parameters.AddWithValue("@p31", (object)(asset.Dnp3PointClass ?? "analog_output"));
             cmd.Parameters.AddWithValue("@p32", asset.Dnp3EventClass > 0 ? asset.Dnp3EventClass : 1);
             cmd.Parameters.AddWithValue("@p33", asset.Dnp3StaticVariation);
 
@@ -192,15 +192,15 @@ namespace OLRTLabSim.Controllers
 
             cmd.Parameters.Clear();
             cmd.Parameters.AddWithValue("@p1", name);
-            cmd.Parameters.AddWithValue("@p2", asset.Type ?? "General");
-            cmd.Parameters.AddWithValue("@p3", asset.SubType ?? "Analog");
-            cmd.Parameters.AddWithValue("@p4", asset.Protocol ?? "bacnet");
+            cmd.Parameters.AddWithValue("@p2", (object)(asset.Type ?? "General"));
+            cmd.Parameters.AddWithValue("@p3", (object)(asset.SubType ?? "Analog"));
+            cmd.Parameters.AddWithValue("@p4", (object)(asset.Protocol ?? "bacnet"));
             cmd.Parameters.AddWithValue("@p5", asset.Address);
             cmd.Parameters.AddWithValue("@p6", asset.MinRange);
             cmd.Parameters.AddWithValue("@p7", asset.MaxRange);
             cmd.Parameters.AddWithValue("@p9", asset.DriftRate);
-            cmd.Parameters.AddWithValue("@p10", asset.Icon);
-            cmd.Parameters.AddWithValue("@p11", asset.Filename);
+            cmd.Parameters.AddWithValue("@p10", asset.Icon ?? (object)DBNull.Value);
+            cmd.Parameters.AddWithValue("@p11", asset.Filename ?? (object)DBNull.Value);
             cmd.Parameters.AddWithValue("@p12", asset.BacnetPort > 0 ? asset.BacnetPort : 47808);
             cmd.Parameters.AddWithValue("@p13", asset.BacnetDeviceId > 0 ? asset.BacnetDeviceId : 1234);
             cmd.Parameters.AddWithValue("@p14", asset.IsNormallyOpen);
@@ -210,16 +210,16 @@ namespace OLRTLabSim.Controllers
             cmd.Parameters.AddWithValue("@p19", normType);
             cmd.Parameters.AddWithValue("@p20", string.IsNullOrWhiteSpace(asset.BacnetProperties) ? "{}" : asset.BacnetProperties);
             cmd.Parameters.AddWithValue("@p21", asset.ModbusUnitId > 0 ? asset.ModbusUnitId : 1);
-            cmd.Parameters.AddWithValue("@p22", asset.ModbusRegisterType ?? "holding");
-            cmd.Parameters.AddWithValue("@p23", asset.ModbusIp ?? "0.0.0.0");
+            cmd.Parameters.AddWithValue("@p22", (object)(asset.ModbusRegisterType ?? "holding"));
+            cmd.Parameters.AddWithValue("@p23", (object)(asset.ModbusIp ?? "0.0.0.0"));
             cmd.Parameters.AddWithValue("@p24", asset.ModbusPort > 0 ? asset.ModbusPort : 5020);
             cmd.Parameters.AddWithValue("@p25", asset.ModbusAlarmAddress ?? (object)DBNull.Value);
             cmd.Parameters.AddWithValue("@p26", asset.ModbusAlarmBit);
-            cmd.Parameters.AddWithValue("@p27", asset.Dnp3Ip ?? "0.0.0.0");
+            cmd.Parameters.AddWithValue("@p27", (object)(asset.Dnp3Ip ?? "0.0.0.0"));
             cmd.Parameters.AddWithValue("@p28", asset.Dnp3Port > 0 ? asset.Dnp3Port : 20000);
             cmd.Parameters.AddWithValue("@p29", asset.Dnp3OutstationAddress > 0 ? asset.Dnp3OutstationAddress : 10);
             cmd.Parameters.AddWithValue("@p30", asset.Dnp3MasterAddress > 0 ? asset.Dnp3MasterAddress : 1);
-            cmd.Parameters.AddWithValue("@p31", asset.Dnp3PointClass ?? "analog_output");
+            cmd.Parameters.AddWithValue("@p31", (object)(asset.Dnp3PointClass ?? "analog_output"));
             cmd.Parameters.AddWithValue("@p32", asset.Dnp3EventClass > 0 ? asset.Dnp3EventClass : 1);
             cmd.Parameters.AddWithValue("@p33", asset.Dnp3StaticVariation);
 
@@ -293,11 +293,11 @@ namespace OLRTLabSim.Controllers
             using var cmd = conn.CreateCommand();
 
             cmd.CommandText = "INSERT INTO bbmd (name, description, port, device_id, ip_address, enabled, created_at) VALUES (@p1, @p2, @p3, @p4, @p5, @p6, @p7)";
-            cmd.Parameters.AddWithValue("@p1", bbmd.Name);
-            cmd.Parameters.AddWithValue("@p2", bbmd.Description);
+            cmd.Parameters.AddWithValue("@p1", bbmd.Name ?? (object)"Unknown");
+            cmd.Parameters.AddWithValue("@p2", bbmd.Description ?? (object)DBNull.Value);
             cmd.Parameters.AddWithValue("@p3", bbmd.Port);
             cmd.Parameters.AddWithValue("@p4", bbmd.DeviceId);
-            cmd.Parameters.AddWithValue("@p5", bbmd.IpAddress);
+            cmd.Parameters.AddWithValue("@p5", bbmd.IpAddress ?? (object)DBNull.Value);
             cmd.Parameters.AddWithValue("@p6", bbmd.Enabled);
             cmd.Parameters.AddWithValue("@p7", Database.GetCurrentUnixTime());
 
@@ -325,11 +325,11 @@ namespace OLRTLabSim.Controllers
             using var cmd = conn.CreateCommand();
 
             cmd.CommandText = "UPDATE bbmd SET name = @p1, description = @p2, port = @p3, device_id = @p4, ip_address = @p5, enabled = @p6 WHERE id = @id";
-            cmd.Parameters.AddWithValue("@p1", bbmd.Name);
-            cmd.Parameters.AddWithValue("@p2", bbmd.Description);
+            cmd.Parameters.AddWithValue("@p1", bbmd.Name ?? (object)"Unknown");
+            cmd.Parameters.AddWithValue("@p2", bbmd.Description ?? (object)DBNull.Value);
             cmd.Parameters.AddWithValue("@p3", bbmd.Port);
             cmd.Parameters.AddWithValue("@p4", bbmd.DeviceId);
-            cmd.Parameters.AddWithValue("@p5", bbmd.IpAddress);
+            cmd.Parameters.AddWithValue("@p5", bbmd.IpAddress ?? (object)DBNull.Value);
             cmd.Parameters.AddWithValue("@p6", bbmd.Enabled);
             cmd.Parameters.AddWithValue("@id", id);
 
