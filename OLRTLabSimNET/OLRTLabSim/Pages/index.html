@@ -1,0 +1,608 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Asset Control Center</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link rel="stylesheet" href="/style.css">
+</head>
+<body class="bg-light">
+    <div class="container py-5">
+        <div class="d-flex justify-content-between align-items-center mb-5">
+            <h2 class="fw-bold"><i class="fas fa-network-wired me-2"></i>Asset Control Center</h2>
+            <div class="d-flex gap-2">
+                <a class="btn btn-outline-info shadow-sm px-3" href="/status">
+                    <i class="fas fa-heartbeat me-2"></i>Service Status
+                </a>
+                <button class="btn btn-success shadow-sm px-4" data-bs-toggle="modal" data-bs-target="#bbmdModal">
+                    <i class="fas fa-server me-2"></i>Manage BBMD
+                </button>
+                <button class="btn btn-primary shadow-sm px-4" data-bs-toggle="modal" data-bs-target="#addModal">
+                    <i class="fas fa-plus me-2"></i>Provision Asset
+                </button>
+            </div>
+        </div>
+
+        <!-- BBMD Section -->
+        <div class="mb-4">
+            <h5 class="mb-3"><i class="fas fa-broadcast-tower me-2"></i>BACnet BBMD Devices</h5>
+            <div id="bbmdGrid" class="row"></div>
+        </div>
+
+        <!-- Assets Section -->
+        <div class="mb-4">
+            <h5 class="mb-3"><i class="fas fa-th-large me-2"></i>Assets</h5>
+            <div id="assetGrid" class="row"></div>
+        </div>
+
+        <div class="mb-4">
+            <h5 class="mb-3"><i class="fas fa-bell me-2"></i>Active Alarms</h5>
+            <div id="alarmList" class="list-group"></div>
+        </div>
+    </div>
+
+    <!-- BBMD Modal -->
+    <div class="modal fade" id="bbmdModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header bg-success text-white">
+                    <h5 class="modal-title">BACnet BBMD Manager</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <button class="btn btn-sm btn-primary" onclick="window.showAddBBMDForm()"><i class="fas fa-plus me-1"></i>Add New BBMD</button>
+                    </div>
+                    <div id="bbmdList"></div>
+
+                    <!-- Add/Edit BBMD Form (initially hidden) -->
+                    <div id="addBBMDForm" style="display:none;" class="border p-3 rounded mt-3 bg-light">
+                        <h6 id="bbmdFormTitle">New BBMD Configuration</h6>
+                        <input type="hidden" id="bbmd_edit_id" value="">
+                        <div class="row g-2">
+                            <div class="col-md-6">
+                                <label class="small">Name</label>
+                                <input type="text" id="bbmd_name" class="form-control form-control-sm">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="small">Description</label>
+                                <input type="text" id="bbmd_desc" class="form-control form-control-sm">
+                            </div>
+                            <div class="col-md-4">
+                                <label class="small">Port</label>
+                                <input type="number" id="bbmd_port" class="form-control form-control-sm" value="47808">
+                            </div>
+                            <div class="col-md-4">
+                                <label class="small">Device ID</label>
+                                <input type="number" id="bbmd_device_id" class="form-control form-control-sm" value="1234">
+                            </div>
+                            <div class="col-md-4">
+                                <label class="small">IP Address</label>
+                                <input type="text" id="bbmd_ip" class="form-control form-control-sm" value="0.0.0.0">
+                            </div>
+                        </div>
+                        <div class="mt-2">
+                            <button class="btn btn-sm btn-success" onclick="window.saveBBMD()">Save BBMD</button>
+                            <button class="btn btn-sm btn-secondary" onclick="window.cancelBBMDForm()">Cancel</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal fade" id="addModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Provision New Asset</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <label class="small fw-bold">Asset Name</label>
+                    <input type="text" id="name" class="form-control mb-2">
+                    <div class="row mb-2">
+                        <div class="col">
+                            <label class="small fw-bold">Sub-Type</label>
+                            <select id="sub_type" class="form-select" onchange="toggleFields('')">
+                                <option value="Analog">Analog</option>
+                                <option value="Digital">Digital</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="row mb-2">
+                        <div class="col">
+                            <label class="small fw-bold">Protocol</label>
+                            <select id="protocol" class="form-select" onchange="toggleProtocolFields('')">
+                                <option value="bacnet">BACnet/IP</option>
+                                <option value="modbus">Modbus TCP</option>
+                                <option value="dnp3">DNP3</option>
+                            </select>
+                        </div>
+                        <div class="col" id="object_type_container">
+                            <label class="small fw-bold">Object Type</label>
+                            <select id="object_type" class="form-select">
+                                <option value="value">Value (R/W)</option>
+                                <option value="input">Input (R)</option>
+                                <option value="output">Output (W)</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div id="analog_fields">
+                        <div class="row mb-2">
+                            <div class="col"><label class="small">Min Range</label><input type="number" id="min" class="form-control" value="0"></div>
+                            <div class="col"><label class="small">Max Range</label><input type="number" id="max" class="form-control" value="100"></div>
+                        </div>
+                        <label class="small">Drift Rate</label>
+                        <input type="number" step="0.1" id="drift" class="form-control mb-2" value="0.5">
+                    </div>
+
+                    <div id="digital_fields" style="display:none;">
+                        <label class="small fw-bold">Logic</label>
+                        <select id="logic_state" class="form-select mb-2"><option value="1">Normally Open</option><option value="0">Normally Closed</option></select>
+                        <div class="row g-2">
+                            <div class="col"><label class="small">Change Prob (%)</label><input type="number" id="prob" class="form-control" value="10"></div>
+                            <div class="col"><label class="small">Check Interval (min)</label><input type="number" id="interval" class="form-control" value="15"></div>
+                        </div>
+                    </div>
+
+                    <div id="bacnet_config_section" class="border-top pt-3 mt-3">
+                        <h6 class="small fw-bold text-primary"><i class="fas fa-network-wired me-1"></i>BACnet Configuration</h6>
+
+                        <label class="small fw-bold">BBMD Device <span class="text-danger">*</span></label>
+                        <select id="bbmd_select" class="form-select mb-2">
+                            <option value="">⚠ Select a BBMD first</option>
+                        </select>
+                        <small class="text-muted d-block mb-2">Select which BBMD will manage this device</small>
+
+                        <div class="row mb-2">
+                            <div class="col">
+                                <label class="small fw-bold">Object Instance/Address <span class="text-danger">*</span></label>
+                                <input type="number" id="addr" class="form-control" value="1" placeholder="e.g., 1, 2, 3...">
+                                <small class="text-muted">Unique identifier within the BBMD</small>
+                            </div>
+                            <div class="col">
+                                <label class="small">Icon</label>
+                                <select id="icon" class="form-select">
+                                    <option value="fa-thermometer-half">Temperature</option>
+                                    <option value="fa-fan">Fan</option>
+                                    <option value="fa-lightbulb">Light</option>
+                                    <option value="fa-gauge">Pressure</option>
+                                    <option value="fa-droplet">Humidity</option>
+                                    <option value="fa-bolt">Power</option>
+                                    <option value="fa-water">Flow/Water</option>
+                                    <option value="fa-gears">Motor/Drive</option>
+                                    <option value="fa-industry">Industrial</option>
+                                </select>
+                            </div>
+                        </div>
+                        <label class="small fw-bold">BACnet Extra Properties (JSON)</label>
+                        <textarea id="bacnet_properties" class="form-control mb-2" rows="2" placeholder='{"units":"degreesCelsius"}'>{}</textarea>
+                        <small class="text-muted d-block">Optional BACnet object properties in JSON (e.g. units, description, resolution).</small>
+                    </div>
+
+                    <div id="modbus_config_section" class="border-top pt-3 mt-3" style="display:none;">
+                        <h6 class="small fw-bold text-warning"><i class="fas fa-network-wired me-1"></i>Modbus TCP Configuration</h6>
+                        <div class="row mb-2">
+                            <div class="col">
+                                <label class="small fw-bold">Register Address <span class="text-danger">*</span></label>
+                                <input type="number" id="modbus_addr" class="form-control" value="1" placeholder="e.g., 40001">
+                                <small class="text-muted">Modbus register address</small>
+                            </div>
+                            <div class="col">
+                                <label class="small">Icon</label>
+                                <select id="modbus_icon" class="form-select">
+                                    <option value="fa-thermometer-half">Temperature</option>
+                                    <option value="fa-fan">Fan</option>
+                                    <option value="fa-lightbulb">Light</option>
+                                    <option value="fa-gauge">Pressure</option>
+                                    <option value="fa-droplet">Humidity</option>
+                                    <option value="fa-bolt">Power</option>
+                                    <option value="fa-water">Flow/Water</option>
+                                    <option value="fa-gears">Motor/Drive</option>
+                                    <option value="fa-industry">Industrial</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="row mb-2">
+                            <div class="col">
+                                <label class="small fw-bold">Modbus IP</label>
+                                <input type="text" id="modbus_ip" class="form-control" value="0.0.0.0">
+                            </div>
+                            <div class="col">
+                                <label class="small fw-bold">Modbus Port</label>
+                                <input type="number" id="modbus_port" class="form-control" value="5020">
+                            </div>
+                        </div>
+                        <div class="row mb-2">
+                            <div class="col">
+                                <label class="small fw-bold">Unit ID</label>
+                                <input type="number" id="modbus_unit_id" class="form-control" value="1">
+                            </div>
+                            <div class="col">
+                                <label class="small fw-bold">Register Type</label>
+                                <select id="modbus_register_type" class="form-select">
+                                    <option value="holding">Holding Register</option>
+                                    <option value="input">Input Register</option>
+                                    <option value="coil">Coil</option>
+                                    <option value="discrete">Discrete Input</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="form-check mb-2">
+                            <input class="form-check-input" type="checkbox" id="modbus_zero_based" checked>
+                            <label class="form-check-label small fw-bold" for="modbus_zero_based">Zero-based reference addressing</label>
+                        </div>
+                        <small class="text-muted d-block mb-2">Recommended for Kepware-style references (e.g., 40001 resolves to offset 0).</small>
+                        <div class="mb-2">
+                            <label class="small fw-bold">32-bit Word Order</label>
+                            <select id="modbus_word_order" class="form-select">
+                                <option value="low_high">First Word Low (Kepware default)</option>
+                                <option value="high_low">First Word High</option>
+                            </select>
+                        </div>
+                        <div class="border rounded p-2 bg-light">
+                            <label class="small fw-bold">Alarm Mapping (Optional)</label>
+                            <div class="row g-2 mt-1">
+                                <div class="col">
+                                    <label class="small">Alarm Address</label>
+                                    <input type="number" id="modbus_alarm_address" class="form-control" placeholder="e.g., 1001">
+                                </div>
+                                <div class="col">
+                                    <label class="small">Alarm Bit (0-15)</label>
+                                    <input type="number" id="modbus_alarm_bit" class="form-control" min="0" max="15" value="0">
+                                </div>
+                            </div>
+                            <small class="text-muted d-block mt-1">For coil/discrete, alarm address is written as 0/1. For register types, alarm bit is set/cleared in a holding register word.</small>
+                        </div>
+                    </div>
+
+                    <div id="dnp3_config_section" class="border-top pt-3 mt-3" style="display:none;">
+                        <h6 class="small fw-bold text-secondary"><i class="fas fa-network-wired me-1"></i>DNP3 Configuration</h6>
+                        <div class="row mb-2">
+                            <div class="col">
+                                <label class="small fw-bold">Point Index <span class="text-danger">*</span></label>
+                                <input type="number" id="dnp3_addr" class="form-control" value="0" placeholder="e.g., 0">
+                            </div>
+                            <div class="col">
+                                <label class="small">Icon</label>
+                                <select id="dnp3_icon" class="form-select">
+                                    <option value="fa-thermometer-half">Temperature</option>
+                                    <option value="fa-fan">Fan</option>
+                                    <option value="fa-lightbulb">Light</option>
+                                    <option value="fa-gauge">Pressure</option>
+                                    <option value="fa-droplet">Humidity</option>
+                                    <option value="fa-bolt">Power</option>
+                                    <option value="fa-water">Flow/Water</option>
+                                    <option value="fa-gears">Motor/Drive</option>
+                                    <option value="fa-industry">Industrial</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="row mb-2">
+                            <div class="col">
+                                <label class="small fw-bold">DNP3 IP</label>
+                                <input type="text" id="dnp3_ip" class="form-control" value="0.0.0.0">
+                            </div>
+                            <div class="col">
+                                <label class="small fw-bold">DNP3 Port</label>
+                                <input type="number" id="dnp3_port" class="form-control" value="20000">
+                            </div>
+                        </div>
+                        <div class="row mb-2">
+                            <div class="col">
+                                <label class="small fw-bold">DNP Server Address</label>
+                                <input type="number" id="dnp3_outstation_address" class="form-control" value="10">
+                            </div>
+                            <div class="col">
+                                <label class="small fw-bold">DNP Client Address</label>
+                                <input type="number" id="dnp3_master_address" class="form-control" value="1">
+                            </div>
+                        </div>
+                        <div class="row mb-2">
+                            <div class="col">
+                                <label class="small fw-bold">Point Class</label>
+                                <select id="dnp3_point_class" class="form-select">
+                                    <option value="device_attributes">Device Attributes (Grp 0, R)</option>
+                                    <option value="binary_input">Binary Input (Grp 1, R)</option>
+                                    <option value="double_bit_input">Double-Bit Input (Grp 3, R)</option>
+                                    <option value="binary_output">Binary Output (Grp 10, R/W)</option>
+                                    <option value="binary_output_command">Binary Output Command (Grp 12, R/W)</option>
+                                    <option value="counter">Counter (Grp 20, R)</option>
+                                    <option value="frozen_counter">Frozen Counter (Grp 21, R)</option>
+                                    <option value="analog_input">Analog Input (Grp 30, R)</option>
+                                    <option value="analog_input_deadband">Analog Input Deadband (Grp 34, R)</option>
+                                    <option value="analog_output">Analog Output (Grp 40, R/W)</option>
+                                    <option value="analog_output_command">Analog Output Command (Grp 41, R/W)</option>
+                                    <option value="time_and_date">Time and Date (Grp 50, R)</option>
+                                    <option value="class_poll_data_request">Class Poll Data Request (Grp 60, W)</option>
+                                    <option value="file_identifiers">File Identifiers (Grp 70, R/W)</option>
+                                    <option value="internal_indications">Internal Indications (Grp 80, R)</option>
+                                    <option value="data_sets">Data Sets (Grp 87, R/W)</option>
+                                    <option value="octet_string">Octet String (Grp 110, R/W)</option>
+                                    <option value="authentication">Authentication (Grp 120, R/W)</option>
+                                </select>
+                            </div>
+                            <div class="col">
+                                <label class="small fw-bold">Event Class</label>
+                                <select id="dnp3_event_class" class="form-select">
+                                    <option value="1">Class 1</option>
+                                    <option value="2">Class 2</option>
+                                    <option value="3">Class 3</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="mb-2">
+                            <label class="small fw-bold">Static Variation</label>
+                            <input type="number" id="dnp3_static_variation" class="form-control" value="0">
+                        </div>
+                    </div>
+
+                    <div class="bg-secondary text-white p-2 rounded small mt-2" style="display:none;">
+                        <div class="row">
+                            <div class="col">BACnet Port: <input type="number" id="bac_port" class="form-control form-control-sm" value="47808"></div>
+                            <div class="col">Device ID: <input type="number" id="bac_id" class="form-control form-control-sm" value="1234"></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer"><button class="btn btn-primary w-100" onclick="saveNewAsset()">Deploy</button></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal fade" id="editModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content border-warning">
+                <div class="modal-header bg-warning">
+                    <h5 class="modal-title">Reconfigure Asset</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <input type="hidden" id="edit_name">
+                    <div class="row mb-2">
+                        <div class="col"><label class="small fw-bold">Sub-Type</label><select id="edit_sub_type" class="form-select" onchange="toggleFields('edit_')"><option value="Analog">Analog</option><option value="Digital">Digital</option></select></div>
+                    </div>
+
+                    <div class="row mb-2">
+                        <div class="col">
+                            <label class="small fw-bold">Protocol</label>
+                            <select id="edit_protocol" class="form-select" onchange="toggleProtocolFields('edit_')"><option value="bacnet">BACnet</option><option value="modbus">Modbus</option><option value="dnp3">DNP3</option></select>
+                        </div>
+                        <div class="col" id="edit_object_type_container">
+                            <label class="small fw-bold">Object Type</label>
+                            <select id="edit_object_type" class="form-select">
+                                <option value="value">Value (R/W)</option>
+                                <option value="input">Input (R)</option>
+                                <option value="output">Output (W)</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div id="edit_analog_fields">
+                        <div class="row mb-2">
+                            <div class="col"><label class="small">Min Range</label><input type="number" id="edit_min" class="form-control"></div>
+                            <div class="col"><label class="small">Max Range</label><input type="number" id="edit_max" class="form-control"></div>
+                        </div>
+                        <label class="small">Drift Rate</label><input type="number" step="0.1" id="edit_drift" class="form-control mb-2">
+                    </div>
+
+                    <div id="edit_digital_fields" style="display:none;">
+                        <label class="small">Logic</label>
+                        <select id="edit_logic_state" class="form-select mb-2"><option value="1">Normally Open</option><option value="0">Normally Closed</option></select>
+                        <div class="row g-2">
+                            <div class="col"><label class="small">Change Prob (%)</label><input type="number" id="edit_prob" class="form-control"></div>
+                            <div class="col"><label class="small">Check Interval (min)</label><input type="number" id="edit_interval" class="form-control"></div>
+                        </div>
+                    </div>
+
+                    <div id="edit_bacnet_config_section" class="border-top pt-3 mt-3">
+                        <h6 class="small fw-bold text-primary"><i class="fas fa-network-wired me-1"></i>BACnet Configuration</h6>
+
+                        <label class="small fw-bold">BBMD Device <span class="text-danger">*</span></label>
+                        <select id="edit_bbmd_select" class="form-select mb-2">
+                            <option value="">⚠ Select a BBMD first</option>
+                        </select>
+                        <small class="text-muted d-block mb-2">Select which BBMD will manage this device</small>
+
+                        <div class="row mb-2">
+                            <div class="col">
+                                <label class="small fw-bold">Object Instance/Address <span class="text-danger">*</span></label>
+                                <input type="number" id="edit_addr" class="form-control" placeholder="e.g., 1, 2, 3...">
+                                <small class="text-muted">Unique identifier within the BBMD</small>
+                            </div>
+                            <div class="col">
+                                <label class="small">Icon</label>
+                                <select id="edit_icon" class="form-select">
+                                    <option value="fa-thermometer-half">Temperature</option>
+                                    <option value="fa-fan">Fan</option>
+                                    <option value="fa-lightbulb">Light</option>
+                                    <option value="fa-gauge">Pressure</option>
+                                    <option value="fa-droplet">Humidity</option>
+                                    <option value="fa-bolt">Power</option>
+                                    <option value="fa-water">Flow/Water</option>
+                                    <option value="fa-gears">Motor/Drive</option>
+                                    <option value="fa-industry">Industrial</option>
+                                </select>
+                            </div>
+                        </div>
+                        <label class="small fw-bold">BACnet Extra Properties (JSON)</label>
+                        <textarea id="edit_bacnet_properties" class="form-control mb-2" rows="2" placeholder='{"units":"degreesCelsius"}'>{}</textarea>
+                        <small class="text-muted d-block">Optional BACnet object properties in JSON (e.g. units, description, resolution).</small>
+                    </div>
+
+                    <div id="edit_modbus_config_section" class="border-top pt-3 mt-3" style="display:none;">
+                        <h6 class="small fw-bold text-warning"><i class="fas fa-network-wired me-1"></i>Modbus TCP Configuration</h6>
+                        <div class="row mb-2">
+                            <div class="col">
+                                <label class="small fw-bold">Register Address <span class="text-danger">*</span></label>
+                                <input type="number" id="edit_modbus_addr" class="form-control" placeholder="e.g., 40001">
+                                <small class="text-muted">Modbus register address</small>
+                            </div>
+                            <div class="col">
+                                <label class="small">Icon</label>
+                                <select id="edit_modbus_icon" class="form-select">
+                                    <option value="fa-thermometer-half">Temperature</option>
+                                    <option value="fa-fan">Fan</option>
+                                    <option value="fa-lightbulb">Light</option>
+                                    <option value="fa-gauge">Pressure</option>
+                                    <option value="fa-droplet">Humidity</option>
+                                    <option value="fa-bolt">Power</option>
+                                    <option value="fa-water">Flow/Water</option>
+                                    <option value="fa-gears">Motor/Drive</option>
+                                    <option value="fa-industry">Industrial</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="row mb-2">
+                            <div class="col">
+                                <label class="small fw-bold">Modbus IP</label>
+                                <input type="text" id="edit_modbus_ip" class="form-control">
+                            </div>
+                            <div class="col">
+                                <label class="small fw-bold">Modbus Port</label>
+                                <input type="number" id="edit_modbus_port" class="form-control">
+                            </div>
+                        </div>
+                        <div class="row mb-2">
+                            <div class="col">
+                                <label class="small fw-bold">Unit ID</label>
+                                <input type="number" id="edit_modbus_unit_id" class="form-control">
+                            </div>
+                            <div class="col">
+                                <label class="small fw-bold">Register Type</label>
+                                <select id="edit_modbus_register_type" class="form-select">
+                                    <option value="holding">Holding Register</option>
+                                    <option value="input">Input Register</option>
+                                    <option value="coil">Coil</option>
+                                    <option value="discrete">Discrete Input</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="form-check mb-2">
+                            <input class="form-check-input" type="checkbox" id="edit_modbus_zero_based" checked>
+                            <label class="form-check-label small fw-bold" for="edit_modbus_zero_based">Zero-based reference addressing</label>
+                        </div>
+                        <div class="mb-2">
+                            <label class="small fw-bold">32-bit Word Order</label>
+                            <select id="edit_modbus_word_order" class="form-select">
+                                <option value="low_high">First Word Low (Kepware default)</option>
+                                <option value="high_low">First Word High</option>
+                            </select>
+                        </div>
+                        <div class="border rounded p-2 bg-light">
+                            <label class="small fw-bold">Alarm Mapping (Optional)</label>
+                            <div class="row g-2 mt-1">
+                                <div class="col">
+                                    <label class="small">Alarm Address</label>
+                                    <input type="number" id="edit_modbus_alarm_address" class="form-control" placeholder="e.g., 1001">
+                                </div>
+                                <div class="col">
+                                    <label class="small">Alarm Bit (0-15)</label>
+                                    <input type="number" id="edit_modbus_alarm_bit" class="form-control" min="0" max="15" value="0">
+                                </div>
+                            </div>
+                            <small class="text-muted d-block mt-1">For coil/discrete, alarm address is written as 0/1. For register types, alarm bit is set/cleared in a holding register word.</small>
+                        </div>
+                    </div>
+
+                    <div id="edit_dnp3_config_section" class="border-top pt-3 mt-3" style="display:none;">
+                        <h6 class="small fw-bold text-secondary"><i class="fas fa-network-wired me-1"></i>DNP3 Configuration</h6>
+                        <div class="row mb-2">
+                            <div class="col">
+                                <label class="small fw-bold">Point Index <span class="text-danger">*</span></label>
+                                <input type="number" id="edit_dnp3_addr" class="form-control" placeholder="e.g., 0">
+                            </div>
+                            <div class="col">
+                                <label class="small">Icon</label>
+                                <select id="edit_dnp3_icon" class="form-select">
+                                    <option value="fa-thermometer-half">Temperature</option>
+                                    <option value="fa-fan">Fan</option>
+                                    <option value="fa-lightbulb">Light</option>
+                                    <option value="fa-gauge">Pressure</option>
+                                    <option value="fa-droplet">Humidity</option>
+                                    <option value="fa-bolt">Power</option>
+                                    <option value="fa-water">Flow/Water</option>
+                                    <option value="fa-gears">Motor/Drive</option>
+                                    <option value="fa-industry">Industrial</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="row mb-2">
+                            <div class="col">
+                                <label class="small fw-bold">DNP3 IP</label>
+                                <input type="text" id="edit_dnp3_ip" class="form-control">
+                            </div>
+                            <div class="col">
+                                <label class="small fw-bold">DNP3 Port</label>
+                                <input type="number" id="edit_dnp3_port" class="form-control">
+                            </div>
+                        </div>
+                        <div class="row mb-2">
+                            <div class="col">
+                                <label class="small fw-bold">DNP Server Address</label>
+                                <input type="number" id="edit_dnp3_outstation_address" class="form-control">
+                            </div>
+                            <div class="col">
+                                <label class="small fw-bold">DNP Client Address</label>
+                                <input type="number" id="edit_dnp3_master_address" class="form-control">
+                            </div>
+                        </div>
+                        <div class="row mb-2">
+                            <div class="col">
+                                <label class="small fw-bold">Point Class</label>
+                                <select id="edit_dnp3_point_class" class="form-select">
+                                    <option value="device_attributes">Device Attributes (Grp 0, R)</option>
+                                    <option value="binary_input">Binary Input (Grp 1, R)</option>
+                                    <option value="double_bit_input">Double-Bit Input (Grp 3, R)</option>
+                                    <option value="binary_output">Binary Output (Grp 10, R/W)</option>
+                                    <option value="binary_output_command">Binary Output Command (Grp 12, R/W)</option>
+                                    <option value="counter">Counter (Grp 20, R)</option>
+                                    <option value="frozen_counter">Frozen Counter (Grp 21, R)</option>
+                                    <option value="analog_input">Analog Input (Grp 30, R)</option>
+                                    <option value="analog_input_deadband">Analog Input Deadband (Grp 34, R)</option>
+                                    <option value="analog_output">Analog Output (Grp 40, R/W)</option>
+                                    <option value="analog_output_command">Analog Output Command (Grp 41, R/W)</option>
+                                    <option value="time_and_date">Time and Date (Grp 50, R)</option>
+                                    <option value="class_poll_data_request">Class Poll Data Request (Grp 60, W)</option>
+                                    <option value="file_identifiers">File Identifiers (Grp 70, R/W)</option>
+                                    <option value="internal_indications">Internal Indications (Grp 80, R)</option>
+                                    <option value="data_sets">Data Sets (Grp 87, R/W)</option>
+                                    <option value="octet_string">Octet String (Grp 110, R/W)</option>
+                                    <option value="authentication">Authentication (Grp 120, R/W)</option>
+                                </select>
+                            </div>
+                            <div class="col">
+                                <label class="small fw-bold">Event Class</label>
+                                <select id="edit_dnp3_event_class" class="form-select">
+                                    <option value="1">Class 1</option>
+                                    <option value="2">Class 2</option>
+                                    <option value="3">Class 3</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="mb-2">
+                            <label class="small fw-bold">Static Variation</label>
+                            <input type="number" id="edit_dnp3_static_variation" class="form-control">
+                        </div>
+                    </div>
+
+                    <div class="bg-secondary text-white p-2 rounded small mt-2" style="display:none;">
+                        <div class="row">
+                            <div class="col"><label class="small">BACnet Port</label><input type="number" id="edit_bac_port" class="form-control form-control-sm"></div>
+                            <div class="col"><label class="small">Dev ID</label><input type="number" id="edit_bac_id" class="form-control form-control-sm"></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer"><button class="btn btn-warning w-100" onclick="saveAssetEdit()">Apply Changes</button></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="/script.js"></script>
+</body>
+</html>
