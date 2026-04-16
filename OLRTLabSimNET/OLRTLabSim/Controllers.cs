@@ -86,6 +86,20 @@ namespace OLRTLabSim.Controllers
                 _dnp3Manager.WriteValue(asset);
         }
 
+        private static string? InferModbusRegisterTypeFromAddress(long address)
+        {
+            var token = Math.Abs(address).ToString();
+            if (token.Length < 5) return null;
+            return token[0] switch
+            {
+                '0' => "coil",
+                '1' => "discrete",
+                '3' => "input",
+                '4' => "holding",
+                _ => null
+            };
+        }
+
         [HttpGet("assets")]
         public IActionResult GetAssets()
         {
@@ -230,6 +244,23 @@ namespace OLRTLabSim.Controllers
             if (string.IsNullOrWhiteSpace(asset.Name))
                 return BadRequest(new { detail = "Asset name is required" });
 
+            if ((asset.Protocol ?? "").Equals("modbus", StringComparison.OrdinalIgnoreCase))
+            {
+                var inferred = InferModbusRegisterTypeFromAddress(asset.Address);
+                if (!string.IsNullOrWhiteSpace(inferred))
+                {
+                    var configured = (asset.ModbusRegisterType ?? "").Trim().ToLowerInvariant();
+                    if (!string.IsNullOrWhiteSpace(configured) && configured != inferred)
+                    {
+                        return BadRequest(new
+                        {
+                            detail = $"Address {asset.Address} maps to Modbus '{inferred}' table. Register type cannot be '{configured}'."
+                        });
+                    }
+                    asset.ModbusRegisterType = inferred;
+                }
+            }
+
             asset.Name = asset.Name.Trim().Replace(" ", "_");
 
             using var conn = Database.GetConnection();
@@ -310,6 +341,23 @@ namespace OLRTLabSim.Controllers
             var existing = LoadAssetByName(name);
             if (existing == null)
                 return NotFound(new { detail = "Asset not found" });
+
+            if ((asset.Protocol ?? "").Equals("modbus", StringComparison.OrdinalIgnoreCase))
+            {
+                var inferred = InferModbusRegisterTypeFromAddress(asset.Address);
+                if (!string.IsNullOrWhiteSpace(inferred))
+                {
+                    var configured = (asset.ModbusRegisterType ?? "").Trim().ToLowerInvariant();
+                    if (!string.IsNullOrWhiteSpace(configured) && configured != inferred)
+                    {
+                        return BadRequest(new
+                        {
+                            detail = $"Address {asset.Address} maps to Modbus '{inferred}' table. Register type cannot be '{configured}'."
+                        });
+                    }
+                    asset.ModbusRegisterType = inferred;
+                }
+            }
 
             if (existing.Protocol == "bacnet" && existing.BbmdId.HasValue)
                 await _bacnetManager.UnregisterAsset(name);
