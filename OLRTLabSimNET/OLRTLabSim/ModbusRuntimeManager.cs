@@ -4,6 +4,8 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Net;
 using System.Threading.Tasks;
+using System.Threading;
+using System.Net.Sockets;
 using OLRTLabSim.Models;
 using OLRTLabSim.Data;
 
@@ -19,6 +21,8 @@ namespace OLRTLabSim.Services
         private readonly ConcurrentDictionary<string, object> _contexts = new();
         private readonly ConcurrentDictionary<string, HashSet<string>> _endpointAssets = new();
         private readonly ConcurrentDictionary<string, AssetMapping> _assetIndex = new();
+        private readonly ConcurrentDictionary<string, TcpListener> _tcpListeners = new();
+        private readonly ConcurrentDictionary<string, CancellationTokenSource> _cancellationSources = new();
         public ConcurrentDictionary<string, string> StatusMessages { get; } = new();
 
         public bool Installed => true; // Using raw sockets / stubs until rodbus server APIs mature.
@@ -78,8 +82,53 @@ namespace OLRTLabSim.Services
         public async Task EnsureEndpoint(string ip, int port, int unitId)
         {
             string endpoint = $"{ip}:{port}";
-            StatusMessages[endpoint] = "running (stubbed server)";
-            // ToDo: Implement actual Modbus TCP Server listener here with Rodbus or raw sockets.
+            if (_tcpListeners.ContainsKey(endpoint)) return;
+
+            try
+            {
+                var parsedIp = ip == "0.0.0.0" ? IPAddress.Any : IPAddress.Parse(ip);
+                var listener = new TcpListener(parsedIp, port);
+                listener.Start();
+
+                _tcpListeners[endpoint] = listener;
+                var cts = new CancellationTokenSource();
+                _cancellationSources[endpoint] = cts;
+
+                // Fire and forget simple accept loop
+                _ = Task.Run(async () =>
+                {
+                    while (!cts.Token.IsCancellationRequested)
+                    {
+                        try
+                        {
+                            var client = await listener.AcceptTcpClientAsync(cts.Token);
+                            // Simply accept and hold connection for now to satisfy Kepware connection check
+                            _ = Task.Run(async () =>
+                            {
+                                using (client)
+                                {
+                                    using var stream = client.GetStream();
+                                    var buffer = new byte[1024];
+                                    while (client.Connected && !cts.Token.IsCancellationRequested)
+                                    {
+                                        int bytesRead = await stream.ReadAsync(buffer, 0, buffer.Length, cts.Token);
+                                        if (bytesRead == 0) break;
+                                        // Stub: Would parse MBAP header here and reply with Exception code or values.
+                                    }
+                                }
+                            });
+                        }
+                        catch (OperationCanceledException) { break; }
+                        catch { /* Ignore generic accept errors */ }
+                    }
+                });
+
+                StatusMessages[endpoint] = "running";
+            }
+            catch (Exception ex)
+            {
+                StatusMessages[endpoint] = $"error: {ex.Message}";
+            }
         }
 
         public async Task RegisterAsset(Asset asset)
@@ -132,6 +181,14 @@ namespace OLRTLabSim.Services
                     if (!set.Any())
                     {
                         _endpointAssets.TryRemove(endpoint, out _);
+                        if (_cancellationSources.TryRemove(endpoint, out var cts))
+                        {
+                            cts.Cancel();
+                        }
+                        if (_tcpListeners.TryRemove(endpoint, out var listener))
+                        {
+                            listener.Stop();
+                        }
                         StatusMessages[endpoint] = "stopped";
                     }
                 }

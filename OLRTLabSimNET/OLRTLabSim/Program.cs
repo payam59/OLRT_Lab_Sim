@@ -29,7 +29,10 @@ try
     // Background Engine
     builder.Services.AddHostedService<SimulationEngine>();
 
-    builder.Services.AddControllersWithViews();
+    builder.Services.AddControllersWithViews().AddJsonOptions(options =>
+    {
+        options.JsonSerializerOptions.PropertyNamingPolicy = new OLRTLabSim.Helpers.SnakeCaseNamingPolicy();
+    });
 
     var app = builder.Build();
 
