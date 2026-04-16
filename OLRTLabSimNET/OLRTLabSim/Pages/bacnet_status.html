@@ -223,8 +223,8 @@
             `).join('');
             objectsTable.innerHTML = objectRows || '<tr><td colspan="6" class="text-muted">No BACnet objects registered.</td></tr>';
 
-            document.getElementById('modbusInstalled').textContent = modbus.pymodbus_installed ? 'Yes' : 'No';
-            document.getElementById('modbusInstalled').className = modbus.pymodbus_installed ? 'fw-bold fs-5 text-success' : 'fw-bold fs-5 text-danger';
+            document.getElementById('modbusInstalled').textContent = modbus.rodbus_installed ? 'Yes' : 'No';
+            document.getElementById('modbusInstalled').className = modbus.rodbus_installed ? 'fw-bold fs-5 text-success' : 'fw-bold fs-5 text-danger';
             document.getElementById('modbusEndpointCount').textContent = (modbus.endpoints || []).length;
             document.getElementById('modbusAssetCount').textContent = modbus.asset_count || 0;
 

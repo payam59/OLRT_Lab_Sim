@@ -239,7 +239,7 @@ namespace OLRTLabSim.Services
         {
             return new
             {
-                bacpypes_installed = Installed,
+                bacnet_installed = Installed,
                 bbmd_status = _bbmdStatus,
                 object_count = _objectIndex.Count
             };

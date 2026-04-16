@@ -51,7 +51,7 @@ try
         await context.Response.SendFileAsync("Pages/bacnet_status.html");
     });
 
-    app.Run("http://0.0.0.0:8001");
+    app.Run();
 }
 catch (System.Exception ex)
 {

@@ -176,7 +176,7 @@ namespace OLRTLabSim.Services
         {
             return new
             {
-                pymodbus_installed = Installed,
+                rodbus_installed = Installed,
                 endpoints = _endpointAssets.Keys.ToList(),
                 asset_count = _assetIndex.Count,
                 status_messages = StatusMessages,
