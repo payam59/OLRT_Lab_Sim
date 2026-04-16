@@ -1,6 +1,6 @@
 using System;
 using System.Collections.Generic;
-using System.Data.SQLite;
+using Microsoft.Data.Sqlite;
 using System.IO;
 
 namespace OLRTLabSim.Data
@@ -152,9 +152,9 @@ namespace OLRTLabSim.Data
             }
         }
 
-        public static SQLiteConnection GetConnection()
+        public static SqliteConnection GetConnection()
         {
-            var conn = new SQLiteConnection($"Data Source={DbFile};Version=3;");
+            var conn = new SqliteConnection($"Data Source={DbFile};Version=3;");
             conn.Open();
             return conn;
         }
