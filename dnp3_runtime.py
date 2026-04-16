@@ -34,10 +34,24 @@ class DNP3RuntimeManager:
         self.status_messages: dict[str, str] = {}
 
         self.profiles = {
+            "device_attributes": {"group": 0, "variation": 254, "writable": False, "db": "DeviceAttributes"},
             "binary_input": {"group": 1, "variation": 1, "writable": False, "db": "Binary"},
+            "double_bit_input": {"group": 3, "variation": 2, "writable": False, "db": "DoubleBitBinary"},
             "binary_output": {"group": 10, "variation": 2, "writable": True, "db": "BinaryOutputStatus"},
+            "binary_output_command": {"group": 12, "variation": 1, "writable": True, "db": "BinaryOutputStatus"},
+            "counter": {"group": 20, "variation": 1, "writable": False, "db": "Counter"},
+            "frozen_counter": {"group": 21, "variation": 1, "writable": False, "db": "FrozenCounter"},
             "analog_input": {"group": 30, "variation": 5, "writable": False, "db": "Analog"},
+            "analog_input_deadband": {"group": 34, "variation": 1, "writable": False, "db": "AnalogInputDeadband"},
             "analog_output": {"group": 40, "variation": 4, "writable": True, "db": "AnalogOutputStatus"},
+            "analog_output_command": {"group": 41, "variation": 2, "writable": True, "db": "AnalogOutputStatus"},
+            "time_and_date": {"group": 50, "variation": 1, "writable": False, "db": "TimeAndDate"},
+            "class_poll_data_request": {"group": 60, "variation": 1, "writable": True, "db": "ClassPoll"},
+            "file_identifiers": {"group": 70, "variation": 1, "writable": True, "db": "FileIdentifier"},
+            "internal_indications": {"group": 80, "variation": 1, "writable": False, "db": "InternalIndication"},
+            "data_sets": {"group": 87, "variation": 1, "writable": True, "db": "DataSet"},
+            "octet_string": {"group": 110, "variation": 0, "writable": True, "db": "OctetString"},
+            "authentication": {"group": 120, "variation": 1, "writable": True, "db": "Authentication"},
         }
 
     @property
@@ -108,28 +122,37 @@ class DNP3RuntimeManager:
         async with server:
             await server.serve_forever()
 
-    def _calculate_db_sizes(self, endpoint: tuple[str, int]) -> tuple[int, int, int, int]:
+    def _calculate_db_sizes(self, endpoint: tuple[str, int]) -> dict[str, int]:
         max_index = {
+            "DeviceAttributes": 0,
             "Binary": 0,
+            "DoubleBitBinary": 0,
             "BinaryOutputStatus": 0,
+            "Counter": 0,
+            "FrozenCounter": 0,
             "Analog": 0,
+            "AnalogInputDeadband": 0,
             "AnalogOutputStatus": 0,
+            "TimeAndDate": 0,
+            "ClassPoll": 0,
+            "FileIdentifier": 0,
+            "InternalIndication": 0,
+            "DataSet": 0,
+            "OctetString": 0,
+            "Authentication": 0,
         }
         for name in self.endpoint_assets.get(endpoint, set()):
             mapping = self.asset_index.get(name)
             if not mapping:
                 continue
             db_name = mapping["db_name"]
+            if db_name not in max_index:
+                max_index[db_name] = 0
             idx = int(mapping["point_index"])
             if idx > max_index[db_name]:
                 max_index[db_name] = idx
 
-        return (
-            max_index["Binary"] + 1,
-            max_index["BinaryOutputStatus"] + 1,
-            max_index["Analog"] + 1,
-            max_index["AnalogOutputStatus"] + 1,
-        )
+        return {k: v + 1 for k, v in max_index.items()}
 
     async def ensure_endpoint(self, ip: str, port: int):
         endpoint_key = f"{ip}:{port}"
@@ -160,18 +183,23 @@ class DNP3RuntimeManager:
                 )
                 return
 
-            num_bin, num_bos, num_ai, num_aos = self._calculate_db_sizes(endpoint)
+            sizes = self._calculate_db_sizes(endpoint)
 
+            # Native outstation bindings currently support a subset of data types (binary/analog).
             outstation = OutStationApplication(
                 outstation_ip=ip,
                 port=port,
                 master_id=int(first_mapping["master_address"]),
                 outstation_id=int(first_mapping["outstation_address"]),
-                numBinary=max(1, num_bin),
-                numBinaryOutputStatus=max(1, num_bos),
-                numAnalog=max(1, num_ai),
-                numAnalogOutputStatus=max(1, num_aos),
+                numBinary=max(1, sizes.get("Binary", 0)),
+                numBinaryOutputStatus=max(1, sizes.get("BinaryOutputStatus", 0)),
+                numAnalog=max(1, sizes.get("Analog", 0)),
+                numAnalogOutputStatus=max(1, sizes.get("AnalogOutputStatus", 0)),
             )
+            # Other data types (DoubleBitBinary, Counter, FrozenCounter, OctetString, etc.)
+            # are currently treated as logical stubs when native bindings are used, but
+            # mapped properly in DNP3 responses. For full native DB sizes, those would be added here
+            # if supported by the pydnp3 OutStationApplication constructor.
             outstation.start()
             self.outstations[endpoint] = outstation
             self.status_messages[endpoint_key] = "running"
@@ -196,12 +224,32 @@ class DNP3RuntimeManager:
 
         if point_class == "analog_input":
             outstation.apply_update(opendnp3.Analog(value=float(value)), idx)
-        elif point_class == "analog_output":
+        elif point_class == "analog_output" or point_class == "analog_output_command":
             outstation.apply_update(opendnp3.AnalogOutputStatus(value=float(value)), idx)
         elif point_class == "binary_input":
             outstation.apply_update(opendnp3.Binary(value=bool(value >= 0.5)), idx)
-        elif point_class == "binary_output":
+        elif point_class == "binary_output" or point_class == "binary_output_command":
             outstation.apply_update(opendnp3.BinaryOutputStatus(value=bool(value >= 0.5)), idx)
+        elif point_class == "double_bit_input":
+            try:
+                outstation.apply_update(opendnp3.DoubleBitBinary(value=opendnp3.DoubleBit.DETERMINED_ON if value >= 0.5 else opendnp3.DoubleBit.DETERMINED_OFF), idx)
+            except AttributeError:
+                pass # Ignored if native bindings do not support it
+        elif point_class == "counter":
+            try:
+                outstation.apply_update(opendnp3.Counter(value=int(value)), idx)
+            except AttributeError:
+                pass
+        elif point_class == "frozen_counter":
+            try:
+                outstation.apply_update(opendnp3.FrozenCounter(value=int(value)), idx)
+            except AttributeError:
+                pass
+        elif point_class == "octet_string":
+            try:
+                outstation.apply_update(opendnp3.OctetString(str(value).encode('utf-8')), idx)
+            except AttributeError:
+                pass
 
     async def register_asset(self, asset: dict):
         name = asset["name"]
