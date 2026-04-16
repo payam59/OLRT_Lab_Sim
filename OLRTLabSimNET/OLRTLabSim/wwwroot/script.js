@@ -224,6 +224,41 @@ function updateBBMDList() {
     `).join('');
 }
 
+function inferModbusRegisterTypeFromAddress(rawAddress) {
+    const cleaned = String(rawAddress ?? '').trim();
+    if (!cleaned) return null;
+    const digitsOnly = cleaned.replace(/\D/g, '');
+    if (!digitsOnly) return null;
+
+    // Kepware-style 5/6 digit references:
+    // 0xxxx/0xxxxx -> coil, 1xxxx/1xxxxx -> discrete,
+    // 3xxxx/3xxxxx -> input register, 4xxxx/4xxxxx -> holding register.
+    if (digitsOnly.length >= 5) {
+        const table = digitsOnly.charAt(0);
+        if (table === '0') return 'coil';
+        if (table === '1') return 'discrete';
+        if (table === '3') return 'input';
+        if (table === '4') return 'holding';
+    }
+    return null;
+}
+
+function enforceModbusRegisterType(prefix = '') {
+    const addrEl = document.getElementById(prefix + 'modbus_addr');
+    const regEl = document.getElementById(prefix + 'modbus_register_type');
+    if (!addrEl || !regEl) return;
+
+    const inferred = inferModbusRegisterTypeFromAddress(addrEl.value);
+    Array.from(regEl.options).forEach(o => o.disabled = false);
+
+    if (!inferred) return;
+
+    Array.from(regEl.options).forEach(o => {
+        o.disabled = o.value !== inferred;
+    });
+    regEl.value = inferred;
+}
+
 window.showAddBBMDForm = function() {
     document.getElementById('bbmdFormTitle').textContent = 'New BBMD Configuration';
     document.getElementById('bbmd_edit_id').value = '';
@@ -392,7 +427,11 @@ window.saveNewAsset = async function() {
 };
 
 window.openEditModal = async function(name) {
-    const res = await fetch(`/api/assets/${name}`);
+    const res = await fetch(`/api/assets/${encodeURIComponent(name)}`);
+    if (!res.ok) {
+        alert('Failed to load asset details for edit.');
+        return;
+    }
     const a = await res.json();
 
     document.getElementById('edit_name').value = a.name;
@@ -427,6 +466,7 @@ window.openEditModal = async function(name) {
         document.getElementById('edit_modbus_word_order').value = a.modbus_word_order || 'low_high';
         document.getElementById('edit_modbus_alarm_address').value = a.modbus_alarm_address ?? '';
         document.getElementById('edit_modbus_alarm_bit').value = a.modbus_alarm_bit ?? 0;
+        enforceModbusRegisterType('edit_');
     } else {
         document.getElementById('edit_dnp3_addr').value = a.address;
         document.getElementById('edit_dnp3_icon').value = a.icon;
@@ -513,7 +553,7 @@ window.saveAssetEdit = async function() {
         return;
     }
 
-    const res = await fetch(`/api/assets/${name}`, {
+    const res = await fetch(`/api/assets/${encodeURIComponent(name)}`, {
         method: 'PUT',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify(data)
@@ -589,6 +629,19 @@ document.addEventListener('DOMContentLoaded', () => {
         editProtocolSelect.addEventListener('change', () => window.toggleProtocolFields('edit_'));
     }
     window.toggleProtocolFields('');
+    enforceModbusRegisterType('');
+    enforceModbusRegisterType('edit_');
+
+    const modbusAddr = document.getElementById('modbus_addr');
+    if (modbusAddr) {
+        modbusAddr.addEventListener('input', () => enforceModbusRegisterType(''));
+        modbusAddr.addEventListener('change', () => enforceModbusRegisterType(''));
+    }
+    const editModbusAddr = document.getElementById('edit_modbus_addr');
+    if (editModbusAddr) {
+        editModbusAddr.addEventListener('input', () => enforceModbusRegisterType('edit_'));
+        editModbusAddr.addEventListener('change', () => enforceModbusRegisterType('edit_'));
+    }
 
     const bbmdGrid = document.getElementById('bbmdGrid');
     if (bbmdGrid) {

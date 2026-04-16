@@ -23,6 +23,83 @@ namespace OLRTLabSim.Controllers
             _dnp3Manager = dnp3Manager;
         }
 
+        private Asset? LoadAssetByName(string name)
+        {
+            using var conn = Database.GetConnection();
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT * FROM assets WHERE name = @name";
+            cmd.Parameters.AddWithValue("@name", name);
+            using var reader = cmd.ExecuteReader();
+            if (!reader.Read()) return null;
+
+            return new Asset
+            {
+                Id = Convert.ToInt64(reader["id"]),
+                Name = reader["name"].ToString(),
+                Type = reader["type"].ToString(),
+                SubType = reader["sub_type"].ToString(),
+                Protocol = reader["protocol"].ToString(),
+                Address = Convert.ToInt64(reader["address"]),
+                MinRange = Convert.ToDouble(reader["min_range"]),
+                MaxRange = Convert.ToDouble(reader["max_range"]),
+                CurrentValue = Convert.ToDouble(reader["current_value"]),
+                DriftRate = Convert.ToDouble(reader["drift_rate"]),
+                ManualOverride = Convert.ToInt64(reader["manual_override"]),
+                Icon = reader["icon"] == DBNull.Value ? null : reader["icon"].ToString(),
+                Filename = reader["filename"] == DBNull.Value ? null : reader["filename"].ToString(),
+                BacnetPort = Convert.ToInt64(reader["bacnet_port"]),
+                BacnetDeviceId = Convert.ToInt64(reader["bacnet_device_id"]),
+                IsNormallyOpen = Convert.ToInt64(reader["is_normally_open"]),
+                ChangeProbability = Convert.ToDouble(reader["change_probability"]),
+                ChangeInterval = Convert.ToInt64(reader["change_interval"]),
+                LastFlipCheck = Convert.ToDouble(reader["last_flip_check"]),
+                BbmdId = reader["bbmd_id"] == DBNull.Value ? null : Convert.ToInt64(reader["bbmd_id"]),
+                ObjectType = reader["object_type"].ToString(),
+                BacnetProperties = reader["bacnet_properties"] == DBNull.Value ? "{}" : reader["bacnet_properties"].ToString(),
+                ModbusUnitId = Convert.ToInt64(reader["modbus_unit_id"]),
+                ModbusRegisterType = reader["modbus_register_type"].ToString(),
+                ModbusIp = reader["modbus_ip"] == DBNull.Value ? "0.0.0.0" : reader["modbus_ip"].ToString(),
+                ModbusPort = Convert.ToInt64(reader["modbus_port"]),
+                ModbusAlarmAddress = reader["modbus_alarm_address"] == DBNull.Value ? null : Convert.ToInt64(reader["modbus_alarm_address"]),
+                ModbusAlarmBit = Convert.ToInt64(reader["modbus_alarm_bit"]),
+                ModbusZeroBased = Convert.ToInt64(reader["modbus_zero_based"]),
+                ModbusWordOrder = reader["modbus_word_order"].ToString(),
+                Dnp3Ip = reader["dnp3_ip"] == DBNull.Value ? "0.0.0.0" : reader["dnp3_ip"].ToString(),
+                Dnp3Port = Convert.ToInt64(reader["dnp3_port"]),
+                Dnp3OutstationAddress = Convert.ToInt64(reader["dnp3_outstation_address"]),
+                Dnp3MasterAddress = Convert.ToInt64(reader["dnp3_master_address"]),
+                Dnp3PointClass = reader["dnp3_point_class"].ToString(),
+                Dnp3EventClass = Convert.ToInt64(reader["dnp3_event_class"]),
+                Dnp3StaticVariation = Convert.ToInt64(reader["dnp3_static_variation"]),
+                AlarmState = Convert.ToInt64(reader["alarm_state"]),
+                AlarmMessage = reader["alarm_message"] == DBNull.Value ? null : reader["alarm_message"].ToString()
+            };
+        }
+
+        private void PushToRuntime(Asset asset)
+        {
+            if (asset.Protocol == "bacnet")
+                _bacnetManager.UpdateValue(asset.Name, asset.CurrentValue, asset.SubType, asset.IsNormallyOpen);
+            else if (asset.Protocol == "modbus")
+                _modbusManager.WriteValue(asset);
+            else if (asset.Protocol == "dnp3")
+                _dnp3Manager.WriteValue(asset);
+        }
+
+        private static string? InferModbusRegisterTypeFromAddress(long address)
+        {
+            var token = Math.Abs(address).ToString();
+            if (token.Length < 5) return null;
+            return token[0] switch
+            {
+                '0' => "coil",
+                '1' => "discrete",
+                '3' => "input",
+                '4' => "holding",
+                _ => null
+            };
+        }
+
         [HttpGet("assets")]
         public IActionResult GetAssets()
         {
@@ -72,10 +149,93 @@ namespace OLRTLabSim.Controllers
                     dnp3_event_class = reader["dnp3_event_class"],
                     dnp3_static_variation = reader["dnp3_static_variation"],
                     alarm_state = reader["alarm_state"],
-                    alarm_message = reader["alarm_message"] == DBNull.Value ? null : reader["alarm_message"]?.ToString()
+                    alarm_message = reader["alarm_message"] == DBNull.Value ? null : reader["alarm_message"]?.ToString(),
+                    dnp3_kepware_address = _dnp3Manager.GetKepwareAddress(reader["name"]?.ToString() ?? "")
                 });
             }
             return Ok(assets);
+        }
+
+        [HttpGet("assets/{name}")]
+        public IActionResult GetAsset(string name)
+        {
+            var asset = LoadAssetByName(name);
+            if (asset == null) return NotFound(new { detail = "Asset not found" });
+
+            return Ok(new {
+                id = asset.Id,
+                name = asset.Name,
+                type = asset.Type,
+                sub_type = asset.SubType,
+                protocol = asset.Protocol,
+                address = asset.Address,
+                min_range = asset.MinRange,
+                max_range = asset.MaxRange,
+                current_value = asset.CurrentValue,
+                drift_rate = asset.DriftRate,
+                manual_override = asset.ManualOverride,
+                icon = asset.Icon,
+                filename = asset.Filename,
+                bacnet_port = asset.BacnetPort,
+                bacnet_device_id = asset.BacnetDeviceId,
+                is_normally_open = asset.IsNormallyOpen,
+                change_probability = asset.ChangeProbability,
+                change_interval = asset.ChangeInterval,
+                bbmd_id = asset.BbmdId,
+                object_type = asset.ObjectType,
+                bacnet_properties = asset.BacnetProperties,
+                modbus_unit_id = asset.ModbusUnitId,
+                modbus_register_type = asset.ModbusRegisterType,
+                modbus_ip = asset.ModbusIp,
+                modbus_port = asset.ModbusPort,
+                modbus_alarm_address = asset.ModbusAlarmAddress,
+                modbus_alarm_bit = asset.ModbusAlarmBit,
+                modbus_zero_based = asset.ModbusZeroBased,
+                modbus_word_order = asset.ModbusWordOrder,
+                dnp3_ip = asset.Dnp3Ip,
+                dnp3_port = asset.Dnp3Port,
+                dnp3_outstation_address = asset.Dnp3OutstationAddress,
+                dnp3_master_address = asset.Dnp3MasterAddress,
+                dnp3_point_class = asset.Dnp3PointClass,
+                dnp3_event_class = asset.Dnp3EventClass,
+                dnp3_static_variation = asset.Dnp3StaticVariation,
+                alarm_state = asset.AlarmState,
+                alarm_message = asset.AlarmMessage,
+                dnp3_kepware_address = _dnp3Manager.GetKepwareAddress(asset.Name)
+            });
+        }
+
+        [HttpPut("override/{name}")]
+        public IActionResult OverrideAsset(string name, [FromQuery] double value)
+        {
+            using var conn = Database.GetConnection();
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "UPDATE assets SET current_value = @value, manual_override = 1 WHERE name = @name";
+            cmd.Parameters.AddWithValue("@value", value);
+            cmd.Parameters.AddWithValue("@name", name);
+            if (cmd.ExecuteNonQuery() == 0)
+                return NotFound(new { detail = "Asset not found" });
+
+            var asset = LoadAssetByName(name);
+            if (asset != null)
+            {
+                PushToRuntime(asset);
+            }
+
+            return Ok(new { message = $"{name} manually overridden to {value}" });
+        }
+
+        [HttpPut("release/{name}")]
+        public IActionResult ReleaseAsset(string name)
+        {
+            using var conn = Database.GetConnection();
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "UPDATE assets SET manual_override = 0 WHERE name = @name";
+            cmd.Parameters.AddWithValue("@name", name);
+            if (cmd.ExecuteNonQuery() == 0)
+                return NotFound(new { detail = "Asset not found" });
+
+            return Ok(new { message = $"{name} released to automation" });
         }
 
         [HttpPost("assets")]
@@ -83,6 +243,23 @@ namespace OLRTLabSim.Controllers
         {
             if (string.IsNullOrWhiteSpace(asset.Name))
                 return BadRequest(new { detail = "Asset name is required" });
+
+            if ((asset.Protocol ?? "").Equals("modbus", StringComparison.OrdinalIgnoreCase))
+            {
+                var inferred = InferModbusRegisterTypeFromAddress(asset.Address);
+                if (!string.IsNullOrWhiteSpace(inferred))
+                {
+                    var configured = (asset.ModbusRegisterType ?? "").Trim().ToLowerInvariant();
+                    if (!string.IsNullOrWhiteSpace(configured) && configured != inferred)
+                    {
+                        return BadRequest(new
+                        {
+                            detail = $"Address {asset.Address} maps to Modbus '{inferred}' table. Register type cannot be '{configured}'."
+                        });
+                    }
+                    asset.ModbusRegisterType = inferred;
+                }
+            }
 
             asset.Name = asset.Name.Trim().Replace(" ", "_");
 
@@ -154,27 +331,51 @@ namespace OLRTLabSim.Controllers
             else if (asset.Protocol == "dnp3")
                 await _dnp3Manager.RegisterAsset(asset);
 
+            PushToRuntime(asset);
             return Ok(new { message = "Asset added successfully" });
         }
 
         [HttpPut("assets/{name}")]
         public async Task<IActionResult> UpdateAsset(string name, [FromBody] Asset asset)
         {
-            using var conn = Database.GetConnection();
-            using var cmd = conn.CreateCommand();
-
-            cmd.CommandText = "SELECT COUNT(*) FROM assets WHERE name = @name";
-            cmd.Parameters.AddWithValue("@name", name);
-            if (Convert.ToInt64(cmd.ExecuteScalar()) == 0)
+            var existing = LoadAssetByName(name);
+            if (existing == null)
                 return NotFound(new { detail = "Asset not found" });
 
-            if (asset.Protocol == "bacnet" && asset.BbmdId.HasValue)
+            if ((asset.Protocol ?? "").Equals("modbus", StringComparison.OrdinalIgnoreCase))
+            {
+                var inferred = InferModbusRegisterTypeFromAddress(asset.Address);
+                if (!string.IsNullOrWhiteSpace(inferred))
+                {
+                    var configured = (asset.ModbusRegisterType ?? "").Trim().ToLowerInvariant();
+                    if (!string.IsNullOrWhiteSpace(configured) && configured != inferred)
+                    {
+                        return BadRequest(new
+                        {
+                            detail = $"Address {asset.Address} maps to Modbus '{inferred}' table. Register type cannot be '{configured}'."
+                        });
+                    }
+                    asset.ModbusRegisterType = inferred;
+                }
+            }
+
+            if (existing.Protocol == "bacnet" && existing.BbmdId.HasValue)
                 await _bacnetManager.UnregisterAsset(name);
-            else if (asset.Protocol == "modbus")
+            else if (existing.Protocol == "modbus")
                 await _modbusManager.UnregisterAsset(name);
-            else if (asset.Protocol == "dnp3")
+            else if (existing.Protocol == "dnp3")
                 await _dnp3Manager.UnregisterAsset(name);
 
+            var resolvedDnp3Ip = string.IsNullOrWhiteSpace(asset.Dnp3Ip) ? existing.Dnp3Ip : asset.Dnp3Ip;
+            var resolvedDnp3Port = asset.Dnp3Port > 0 ? asset.Dnp3Port : existing.Dnp3Port;
+            var resolvedDnp3OutstationAddress = asset.Dnp3OutstationAddress > 0 ? asset.Dnp3OutstationAddress : existing.Dnp3OutstationAddress;
+            var resolvedDnp3MasterAddress = asset.Dnp3MasterAddress > 0 ? asset.Dnp3MasterAddress : existing.Dnp3MasterAddress;
+            var resolvedDnp3PointClass = string.IsNullOrWhiteSpace(asset.Dnp3PointClass) ? existing.Dnp3PointClass : asset.Dnp3PointClass;
+            var resolvedDnp3EventClass = asset.Dnp3EventClass > 0 ? asset.Dnp3EventClass : existing.Dnp3EventClass;
+            var resolvedDnp3StaticVariation = asset.Dnp3StaticVariation >= 0 ? asset.Dnp3StaticVariation : existing.Dnp3StaticVariation;
+
+            using var conn = Database.GetConnection();
+            using var cmd = conn.CreateCommand();
             string normType = (asset.Protocol == "bacnet" ? asset.ObjectType : "value");
 
             cmd.CommandText = @"
@@ -215,13 +416,13 @@ namespace OLRTLabSim.Controllers
             cmd.Parameters.AddWithValue("@p24", asset.ModbusPort > 0 ? asset.ModbusPort : 5020);
             cmd.Parameters.AddWithValue("@p25", asset.ModbusAlarmAddress ?? (object)DBNull.Value);
             cmd.Parameters.AddWithValue("@p26", asset.ModbusAlarmBit);
-            cmd.Parameters.AddWithValue("@p27", (object)(asset.Dnp3Ip ?? "0.0.0.0"));
-            cmd.Parameters.AddWithValue("@p28", asset.Dnp3Port > 0 ? asset.Dnp3Port : 20000);
-            cmd.Parameters.AddWithValue("@p29", asset.Dnp3OutstationAddress > 0 ? asset.Dnp3OutstationAddress : 10);
-            cmd.Parameters.AddWithValue("@p30", asset.Dnp3MasterAddress > 0 ? asset.Dnp3MasterAddress : 1);
-            cmd.Parameters.AddWithValue("@p31", (object)(asset.Dnp3PointClass ?? "analog_output"));
-            cmd.Parameters.AddWithValue("@p32", asset.Dnp3EventClass > 0 ? asset.Dnp3EventClass : 1);
-            cmd.Parameters.AddWithValue("@p33", asset.Dnp3StaticVariation);
+            cmd.Parameters.AddWithValue("@p27", (object)(resolvedDnp3Ip ?? "0.0.0.0"));
+            cmd.Parameters.AddWithValue("@p28", resolvedDnp3Port > 0 ? resolvedDnp3Port : 20000);
+            cmd.Parameters.AddWithValue("@p29", resolvedDnp3OutstationAddress > 0 ? resolvedDnp3OutstationAddress : 10);
+            cmd.Parameters.AddWithValue("@p30", resolvedDnp3MasterAddress > 0 ? resolvedDnp3MasterAddress : 1);
+            cmd.Parameters.AddWithValue("@p31", (object)(resolvedDnp3PointClass ?? "analog_output"));
+            cmd.Parameters.AddWithValue("@p32", resolvedDnp3EventClass > 0 ? resolvedDnp3EventClass : 1);
+            cmd.Parameters.AddWithValue("@p33", resolvedDnp3StaticVariation);
 
             cmd.ExecuteNonQuery();
 
@@ -231,6 +432,9 @@ namespace OLRTLabSim.Controllers
                 await _modbusManager.RegisterAsset(asset);
             else if (asset.Protocol == "dnp3")
                 await _dnp3Manager.RegisterAsset(asset);
+
+            var updated = LoadAssetByName(name);
+            if (updated != null) PushToRuntime(updated);
 
             return Ok(new { message = "Asset updated successfully" });
         }
@@ -360,12 +564,14 @@ namespace OLRTLabSim.Controllers
         }
 
         [HttpGet("alarms")]
-        public IActionResult GetAlarms()
+        public IActionResult GetAlarms([FromQuery] int active_only = 0)
         {
             var alarms = new List<object>();
             using var conn = Database.GetConnection();
             using var cmd = conn.CreateCommand();
-            cmd.CommandText = "SELECT * FROM alarm_events ORDER BY created_at DESC LIMIT 100";
+            cmd.CommandText = active_only == 1
+                ? "SELECT * FROM alarm_events WHERE active = 1 ORDER BY created_at DESC LIMIT 100"
+                : "SELECT * FROM alarm_events ORDER BY created_at DESC LIMIT 100";
             using var reader = cmd.ExecuteReader();
             while (reader.Read())
             {

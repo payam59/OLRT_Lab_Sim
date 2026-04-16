@@ -7,21 +7,21 @@ using System.Threading.Tasks;
 using Microsoft.Extensions.Hosting;
 using OLRTLabSim.Models;
 using OLRTLabSim.Data;
-// using OLRTLabSim.Services; // Assuming protocols and websocket managers are available in Services
+using OLRTLabSim.Services;
 
 namespace OLRTLabSim.Engine
 {
     public class SimulationEngine : BackgroundService
     {
-        // Placeholders for Protocol Managers
-        // private readonly ModbusRuntimeManager _modbusManager;
-        // private readonly BacnetRuntimeManager _bacnetManager;
-        // private readonly Dnp3RuntimeManager _dnp3Manager;
-        // private readonly WebSocketManager _wsManager;
+        private readonly ModbusRuntimeManager _modbusManager;
+        private readonly BacnetRuntimeManager _bacnetManager;
+        private readonly Dnp3RuntimeManager _dnp3Manager;
 
-        public SimulationEngine()
+        public SimulationEngine(ModbusRuntimeManager modbusManager, BacnetRuntimeManager bacnetManager, Dnp3RuntimeManager dnp3Manager)
         {
-            // Managers injected here
+            _modbusManager = modbusManager;
+            _bacnetManager = bacnetManager;
+            _dnp3Manager = dnp3Manager;
         }
 
         private (bool InAlarm, string Message) CheckAlarmCondition(Asset asset)
@@ -43,6 +43,7 @@ namespace OLRTLabSim.Engine
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
             var rnd = new Random();
+            var bootstrapped = false;
 
             while (!stoppingToken.IsCancellationRequested)
             {
@@ -103,6 +104,33 @@ namespace OLRTLabSim.Engine
                             }
                         }
                     }
+                    if (!bootstrapped)
+                    {
+                        var bbmds = new List<Bbmd>();
+                        using (var bbmdCmd = conn.CreateCommand())
+                        {
+                            bbmdCmd.CommandText = "SELECT * FROM bbmd";
+                            using var bbmdReader = bbmdCmd.ExecuteReader();
+                            while (bbmdReader.Read())
+                            {
+                                bbmds.Add(new Bbmd
+                                {
+                                    Id = Convert.ToInt64(bbmdReader["id"]),
+                                    Name = bbmdReader["name"].ToString(),
+                                    Description = bbmdReader["description"] == DBNull.Value ? null : bbmdReader["description"].ToString(),
+                                    Port = Convert.ToInt64(bbmdReader["port"]),
+                                    DeviceId = Convert.ToInt64(bbmdReader["device_id"]),
+                                    IpAddress = bbmdReader["ip_address"] == DBNull.Value ? "0.0.0.0" : bbmdReader["ip_address"].ToString(),
+                                    Enabled = Convert.ToInt64(bbmdReader["enabled"])
+                                });
+                            }
+                        }
+
+                        await _bacnetManager.Bootstrap(assets, bbmds);
+                        await _modbusManager.Bootstrap(assets);
+                        await _dnp3Manager.Bootstrap(assets);
+                        bootstrapped = true;
+                    }
 
                     double now = Database.GetCurrentUnixTime();
                     bool anyGlobalChange = false;
@@ -113,12 +141,60 @@ namespace OLRTLabSim.Engine
                         bool assetChanged = false;
                         bool alarmChanged = false;
 
-                        // 1. Remote Write Detection
-                        /* (Placeholder for protocols logic)
-                        if (asset.Protocol == "bacnet" && (asset.ObjectType == "output" || asset.ObjectType == "value")) { ... }
-                        if (asset.Protocol == "modbus") { ... }
-                        if (asset.Protocol == "dnp3") { ... }
-                        */
+                        // 1. Remote write detection (keep active even during manual override)
+                        if (asset.Protocol == "bacnet" && (asset.ObjectType == "output" || asset.ObjectType == "value"))
+                        {
+                            var remote = _bacnetManager.GetValue(asset.Name);
+                            if (remote.HasValue && Math.Abs(remote.Value - originalValue) > 0.01)
+                            {
+                                using var remoteCmd = conn.CreateCommand();
+                                remoteCmd.CommandText = "UPDATE assets SET current_value = @val, manual_override = 1 WHERE id = @id";
+                                remoteCmd.Parameters.AddWithValue("@val", remote.Value);
+                                remoteCmd.Parameters.AddWithValue("@id", asset.Id);
+                                remoteCmd.ExecuteNonQuery();
+                                asset.CurrentValue = remote.Value;
+                                asset.ManualOverride = 1;
+                                assetChanged = true;
+                            }
+                        }
+                        else if (asset.Protocol == "modbus")
+                        {
+                            var registerType = (asset.ModbusRegisterType ?? "").ToLowerInvariant();
+                            if (registerType == "holding" || registerType == "coil")
+                            {
+                                var remote = _modbusManager.ReadRemoteValue(asset);
+                                if (remote.HasValue && Math.Abs(remote.Value - originalValue) > 0.01)
+                                {
+                                    using var remoteCmd = conn.CreateCommand();
+                                    remoteCmd.CommandText = "UPDATE assets SET current_value = @val, manual_override = 1 WHERE id = @id";
+                                    remoteCmd.Parameters.AddWithValue("@val", remote.Value);
+                                    remoteCmd.Parameters.AddWithValue("@id", asset.Id);
+                                    remoteCmd.ExecuteNonQuery();
+                                    asset.CurrentValue = remote.Value;
+                                    asset.ManualOverride = 1;
+                                    assetChanged = true;
+                                }
+                            }
+                        }
+                        else if (asset.Protocol == "dnp3")
+                        {
+                            var pointClass = (asset.Dnp3PointClass ?? "").ToLowerInvariant();
+                            if (pointClass == "analog_output" || pointClass == "binary_output")
+                            {
+                                var remote = _dnp3Manager.ReadRemoteValue(asset);
+                                if (remote.HasValue && Math.Abs(remote.Value - originalValue) > 0.01)
+                                {
+                                    using var remoteCmd = conn.CreateCommand();
+                                    remoteCmd.CommandText = "UPDATE assets SET current_value = @val, manual_override = 1 WHERE id = @id";
+                                    remoteCmd.Parameters.AddWithValue("@val", remote.Value);
+                                    remoteCmd.Parameters.AddWithValue("@id", asset.Id);
+                                    remoteCmd.ExecuteNonQuery();
+                                    asset.CurrentValue = remote.Value;
+                                    asset.ManualOverride = 1;
+                                    assetChanged = true;
+                                }
+                            }
+                        }
 
                         // 2. Automation Logic
                         if (asset.ManualOverride == 0)
@@ -222,7 +298,32 @@ namespace OLRTLabSim.Engine
                         }
 
                         // 4. Update Protocol Runtimes
-                        // (Placeholder for protocol update calls)
+                        if (asset.Protocol == "bacnet")
+                        {
+                            bool writable = asset.ObjectType == "output" || asset.ObjectType == "value";
+                            if (assetChanged || alarmChanged || !writable)
+                            {
+                                _bacnetManager.UpdateValue(asset.Name, asset.CurrentValue, asset.SubType, asset.IsNormallyOpen);
+                            }
+                        }
+                        else if (asset.Protocol == "modbus")
+                        {
+                            var registerType = (asset.ModbusRegisterType ?? "").ToLowerInvariant();
+                            bool writable = registerType == "holding" || registerType == "coil";
+                            if (assetChanged || alarmChanged || !writable)
+                            {
+                                _modbusManager.WriteValue(asset);
+                            }
+                        }
+                        else if (asset.Protocol == "dnp3")
+                        {
+                            var pointClass = (asset.Dnp3PointClass ?? "").ToLowerInvariant();
+                            bool writable = pointClass == "analog_output" || pointClass == "binary_output";
+                            if (assetChanged || alarmChanged || !writable)
+                            {
+                                _dnp3Manager.WriteValue(asset);
+                            }
+                        }
 
                         if (assetChanged)
                             anyGlobalChange = true;
