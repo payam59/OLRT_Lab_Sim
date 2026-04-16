@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.DependencyInjection;
@@ -37,10 +38,11 @@ try
     app.MapControllers();
 
     // Endpoints fallback
-    app.MapGet("/", context =>
+    // Explicitly map / to the index page in Pages
+    app.MapGet("/", async context =>
     {
-        context.Response.Redirect("/home");
-        return System.Threading.Tasks.Task.CompletedTask;
+        context.Response.ContentType = "text/html";
+        await context.Response.SendFileAsync("Pages/index.html");
     });
 
     app.Run("http://0.0.0.0:8001");

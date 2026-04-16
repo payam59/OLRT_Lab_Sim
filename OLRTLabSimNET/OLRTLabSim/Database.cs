@@ -154,7 +154,7 @@ namespace OLRTLabSim.Data
 
         public static SqliteConnection GetConnection()
         {
-            var conn = new SqliteConnection($"Data Source={DbFile};Version=3;");
+            var conn = new SqliteConnection($"Data Source={DbFile};");
             conn.Open();
             return conn;
         }
