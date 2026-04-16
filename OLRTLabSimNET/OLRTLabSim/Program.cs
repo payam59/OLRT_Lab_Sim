@@ -45,6 +45,12 @@ try
         await context.Response.SendFileAsync("Pages/index.html");
     });
 
+    app.MapGet("/status", async context =>
+    {
+        context.Response.ContentType = "text/html";
+        await context.Response.SendFileAsync("Pages/bacnet_status.html");
+    });
+
     app.Run("http://0.0.0.0:8001");
 }
 catch (System.Exception ex)
