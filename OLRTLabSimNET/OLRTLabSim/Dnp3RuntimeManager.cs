@@ -2,24 +2,33 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
-using System.Net;
-using System.Net.Sockets;
-using System.Threading;
 using System.Threading.Tasks;
+using dnp3;
 using OLRTLabSim.Models;
 
 namespace OLRTLabSim.Services
 {
     public class Dnp3RuntimeManager
     {
-        private readonly ConcurrentDictionary<string, TcpListener> _listeners = new();
-        private readonly ConcurrentDictionary<string, CancellationTokenSource> _listenerTokens = new();
+        private readonly ConcurrentDictionary<string, ServerContext> _servers = new();
         private readonly ConcurrentDictionary<string, HashSet<string>> _endpointAssets = new();
         private readonly ConcurrentDictionary<string, AssetMapping> _assetIndex = new();
         private readonly ConcurrentDictionary<string, double> _pointValues = new();
         public ConcurrentDictionary<string, string> StatusMessages { get; } = new();
 
+        private readonly Runtime _runtime;
+
         public bool Installed => true;
+
+        private sealed class ServerContext
+        {
+            public required TcpServer Server { get; init; }
+            public required Outstation Outstation { get; init; }
+            public required ControlHandlerImpl ControlHandler { get; init; }
+            public required string Endpoint { get; init; }
+            public required ushort OutstationAddress { get; init; }
+            public required ushort MasterAddress { get; init; }
+        }
 
         public class AssetMapping
         {
@@ -57,134 +66,244 @@ namespace OLRTLabSim.Services
             { "authentication", (120, 1, true, "Authentication") }
         };
 
-        private static ushort CrcDnp(ReadOnlySpan<byte> data)
+        public Dnp3RuntimeManager()
         {
-            int crc = 0;
-            foreach (var value in data)
-            {
-                crc ^= value;
-                for (var i = 0; i < 8; i++)
-                {
-                    if ((crc & 0x0001) != 0)
-                    {
-                        crc = (crc >> 1) ^ 0xA6BC;
-                    }
-                    else
-                    {
-                        crc >>= 1;
-                    }
-                }
-            }
-            crc = ~crc & 0xFFFF;
-            return (ushort)crc;
+            _runtime = new Runtime(new RuntimeConfig { NumCoreThreads = 0 });
         }
 
-        private static byte[] BuildLinkResponse(ushort srcOutstation, ushort destMaster, byte function = 0x0B)
+        private static ulong UnixMillisNow()
         {
-            byte ctrl = (byte)(0x80 | (function & 0x0F));
-            byte[] header =
-            {
-                0x05,
-                0x64,
-                0x05,
-                ctrl,
-                (byte)(destMaster & 0xFF),
-                (byte)((destMaster >> 8) & 0xFF),
-                (byte)(srcOutstation & 0xFF),
-                (byte)((srcOutstation >> 8) & 0xFF)
-            };
-
-            var crc = CrcDnp(header.AsSpan(3, 5));
-            return header.Concat(new[] { (byte)(crc & 0xFF), (byte)((crc >> 8) & 0xFF) }).ToArray();
+            return (ulong)DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         }
 
-        private async Task HandleClient(TcpClient client, string endpoint, CancellationToken token)
+        private static Timestamp NowTimestamp()
         {
-            try
-            {
-                StatusMessages[endpoint] = "connected";
-                using var stream = client.GetStream();
-                byte[] buffer = new byte[4096];
-
-                while (!token.IsCancellationRequested)
-                {
-                    var read = await stream.ReadAsync(buffer, 0, buffer.Length, token);
-                    if (read <= 0) break;
-
-                    if (read >= 10 && buffer[0] == 0x05 && buffer[1] == 0x64)
-                    {
-                        var control = buffer[3];
-                        var dest = (ushort)(buffer[4] | (buffer[5] << 8));
-                        var src = (ushort)(buffer[6] | (buffer[7] << 8));
-                        bool isPrimary = (control & 0x40) != 0;
-                        byte function = (byte)(control & 0x0F);
-
-                        if (isPrimary)
-                        {
-                            var response = function == 0x09
-                                ? BuildLinkResponse(dest, src, 0x0B)
-                                : BuildLinkResponse(dest, src, 0x00);
-                            await stream.WriteAsync(response, 0, response.Length, token);
-                        }
-                    }
-                }
-            }
-            catch { }
-            finally
-            {
-                if (!token.IsCancellationRequested) StatusMessages[endpoint] = "running";
-                client.Close();
-            }
+            return Timestamp.SynchronizedTimestamp(UnixMillisNow());
         }
 
-        private async Task ListenLoop(TcpListener listener, string endpoint, CancellationToken token)
+        private static Flags OnlineFlags()
         {
-            while (!token.IsCancellationRequested)
+            return new Flags(0x01);
+        }
+
+        private sealed class OutstationAppImpl : IOutstationApplication
+        {
+            public ushort GetProcessingDelayMs() => 0;
+            public WriteTimeResult WriteAbsoluteTime(ulong time) => WriteTimeResult.Ok;
+            public ApplicationIin GetApplicationIin() => new();
+            public RestartDelay ColdRestart() => RestartDelay.NotSupported();
+            public RestartDelay WarmRestart() => RestartDelay.NotSupported();
+            public FreezeResult FreezeCountersAll(FreezeType freezeType, Database database) => FreezeResult.NotSupported;
+            public FreezeResult FreezeCountersRange(ushort start, ushort stop, FreezeType freezeType, Database database) => FreezeResult.NotSupported;
+        }
+
+        private sealed class OutstationInfoImpl : IOutstationInformation
+        {
+            public void ProcessRequestFromIdle(RequestHeader header) { }
+            public void BroadcastReceived(FunctionCode functionCode, BroadcastAction action) { }
+            public void EnterSolicitedConfirmWait(byte ecsn) { }
+            public void SolicitedConfirmTimeout(byte ecsn) { }
+            public void SolicitedConfirmReceived(byte ecsn) { }
+            public void SolicitedConfirmWaitNewRequest() { }
+            public void WrongSolicitedConfirmSeq(byte ecsn, byte seq) { }
+            public void UnexpectedConfirm(bool unsolicited, byte seq) { }
+            public void EnterUnsolicitedConfirmWait(byte ecsn) { }
+            public void UnsolicitedConfirmTimeout(byte ecsn, bool retry) { }
+            public void UnsolicitedConfirmed(byte ecsn) { }
+            public void ClearRestartIin() { }
+        }
+
+        private sealed class ControlHandlerImpl : IControlHandler
+        {
+            private readonly ConcurrentDictionary<string, AssetMapping> _assetIndex;
+            private readonly ConcurrentDictionary<string, double> _pointValues;
+            private readonly string _endpoint;
+
+            public ControlHandlerImpl(ConcurrentDictionary<string, AssetMapping> assetIndex, ConcurrentDictionary<string, double> pointValues, string endpoint)
             {
-                try
+                _assetIndex = assetIndex;
+                _pointValues = pointValues;
+                _endpoint = endpoint;
+            }
+
+            public void BeginFragment() { }
+            public void EndFragment() { }
+
+            private bool SupportsBinary(ushort index)
+            {
+                return _assetIndex.Values.Any(m => m.Endpoint == _endpoint && m.PointIndex == index && (m.PointClass == "binary_output" || m.PointClass == "binary_output_command"));
+            }
+
+            private bool SupportsAnalog(ushort index)
+            {
+                return _assetIndex.Values.Any(m => m.Endpoint == _endpoint && m.PointIndex == index &&
+                    (m.PointClass == "analog_output" || m.PointClass == "analog_output_command"));
+            }
+
+            private void CommitValue(ushort index, double value)
+            {
+                foreach (var entry in _assetIndex)
                 {
-                    var client = await listener.AcceptTcpClientAsync(token);
-                    _ = Task.Run(() => HandleClient(client, endpoint, token), token);
-                }
-                catch (OperationCanceledException)
-                {
-                    break;
-                }
-                catch (Exception ex)
-                {
-                    StatusMessages[endpoint] = $"error: {ex.Message}";
-                    break;
+                    var mapping = entry.Value;
+                    if (mapping.Endpoint != _endpoint || mapping.PointIndex != index) continue;
+                    _pointValues[entry.Key] = value;
                 }
             }
+
+            private CommandStatus SelectAnalog(ushort index)
+            {
+                return SupportsAnalog(index) ? CommandStatus.Success : CommandStatus.NotSupported;
+            }
+
+            private CommandStatus OperateAnalog(double value, ushort index, Database database)
+            {
+                if (!SupportsAnalog(index)) return CommandStatus.NotSupported;
+
+                database.UpdateAnalogOutputStatus(
+                    new AnalogOutputStatus(index, value, OnlineFlags(), NowTimestamp()),
+                    new UpdateOptions());
+                CommitValue(index, value);
+                return CommandStatus.Success;
+            }
+
+            public CommandStatus SelectG12v1(G12v1 control, ushort index, Database database)
+            {
+                return SupportsBinary(index) ? CommandStatus.Success : CommandStatus.NotSupported;
+            }
+
+            public CommandStatus OperateG12v1(G12v1 control, ushort index, OperateType opType, Database database)
+            {
+                if (!SupportsBinary(index)) return CommandStatus.NotSupported;
+
+                var value = control.Code == ControlCode.LatchOn || control.Code == ControlCode.PulseOn;
+                database.UpdateBinaryOutputStatus(
+                    new BinaryOutputStatus(index, value, OnlineFlags(), NowTimestamp()),
+                    new UpdateOptions());
+                CommitValue(index, value ? 1.0 : 0.0);
+                return CommandStatus.Success;
+            }
+
+            public CommandStatus SelectG41v1(int control, ushort index, Database database) => SelectAnalog(index);
+            public CommandStatus SelectG41v2(short value, ushort index, Database database) => SelectAnalog(index);
+            public CommandStatus SelectG41v3(float value, ushort index, Database database) => SelectAnalog(index);
+            public CommandStatus SelectG41v4(double value, ushort index, Database database) => SelectAnalog(index);
+
+            public CommandStatus OperateG41v1(int control, ushort index, OperateType opType, Database database) => OperateAnalog(control, index, database);
+            public CommandStatus OperateG41v2(short value, ushort index, OperateType opType, Database database) => OperateAnalog(value, index, database);
+            public CommandStatus OperateG41v3(float value, ushort index, OperateType opType, Database database) => OperateAnalog(value, index, database);
+            public CommandStatus OperateG41v4(double value, ushort index, OperateType opType, Database database) => OperateAnalog(value, index, database);
         }
 
         public async Task EnsureEndpoint(string ip, int port)
         {
             string endpoint = $"{ip}:{port}";
-            if (_listeners.ContainsKey(endpoint))
+            if (_servers.ContainsKey(endpoint))
             {
                 StatusMessages[endpoint] = "running";
                 return;
             }
 
+            if (!_endpointAssets.TryGetValue(endpoint, out var assetsAtEndpoint) || assetsAtEndpoint.Count == 0)
+                return;
+
+            AssetMapping firstMapping;
+            lock (assetsAtEndpoint)
+            {
+                firstMapping = _assetIndex[assetsAtEndpoint.First()];
+            }
+
+            var mixedAddress = false;
+            lock (assetsAtEndpoint)
+            {
+                foreach (var assetName in assetsAtEndpoint)
+                {
+                    var mapping = _assetIndex[assetName];
+                    if (mapping.MasterAddress != firstMapping.MasterAddress || mapping.OutstationAddress != firstMapping.OutstationAddress)
+                    {
+                        mixedAddress = true;
+                        break;
+                    }
+                }
+            }
+
+            if (mixedAddress)
+            {
+                StatusMessages[endpoint] = "error: mixed master/outstation addresses on same endpoint";
+                return;
+            }
+
             try
             {
-                var bindIp = ip == "0.0.0.0" ? IPAddress.Any : IPAddress.Parse(ip);
-                var listener = new TcpListener(bindIp, port);
-                listener.Start();
+                var server = new TcpServer(_runtime, LinkErrorMode.Close, endpoint);
+                var controlHandler = new ControlHandlerImpl(_assetIndex, _pointValues, endpoint);
 
-                var cts = new CancellationTokenSource();
-                _listeners[endpoint] = listener;
-                _listenerTokens[endpoint] = cts;
+                var outstation = server.AddOutstation(
+                    new OutstationConfig(firstMapping.OutstationAddress, firstMapping.MasterAddress),
+                    EventBufferConfig.AllTypes(100),
+                    new OutstationAppImpl(),
+                    new OutstationInfoImpl(),
+                    controlHandler,
+                    new ConnectionStateListener(state =>
+                    {
+                        StatusMessages[endpoint] = state == ConnectionState.Connected ? "connected" : "running";
+                    }),
+                    AddressFilter.Any());
+
+                outstation.Transaction(new OutstationTransaction(db => InitializeDatabase(db, endpoint)));
+                server.Bind();
+
+                _servers[endpoint] = new ServerContext
+                {
+                    Server = server,
+                    Outstation = outstation,
+                    ControlHandler = controlHandler,
+                    Endpoint = endpoint,
+                    OutstationAddress = firstMapping.OutstationAddress,
+                    MasterAddress = firstMapping.MasterAddress
+                };
+
                 StatusMessages[endpoint] = "running";
-
-                _ = Task.Run(() => ListenLoop(listener, endpoint, cts.Token), cts.Token);
             }
             catch (Exception ex)
             {
                 StatusMessages[endpoint] = $"error: {ex.Message}";
             }
+
             await Task.CompletedTask;
+        }
+
+        private void InitializeDatabase(Database db, string endpoint)
+        {
+            var assets = _assetIndex.Where(kv => kv.Value.Endpoint == endpoint).Select(kv => kv).ToList();
+
+            foreach (var entry in assets)
+            {
+                var name = entry.Key;
+                var mapping = entry.Value;
+                var index = mapping.PointIndex;
+
+                switch (mapping.PointClass)
+                {
+                    case "binary_input":
+                        db.AddBinary(index, EventClass.Class1, new BinaryConfig());
+                        db.UpdateBinary(new Binary(index, (_pointValues.GetValueOrDefault(name) >= 0.5), OnlineFlags(), NowTimestamp()), new UpdateOptions());
+                        break;
+                    case "binary_output":
+                    case "binary_output_command":
+                        db.AddBinaryOutputStatus(index, EventClass.Class1, new BinaryOutputStatusConfig());
+                        db.UpdateBinaryOutputStatus(new BinaryOutputStatus(index, (_pointValues.GetValueOrDefault(name) >= 0.5), OnlineFlags(), NowTimestamp()), new UpdateOptions());
+                        break;
+                    case "analog_input":
+                        db.AddAnalog(index, EventClass.Class1, new AnalogConfig());
+                        db.UpdateAnalog(new Analog(index, _pointValues.GetValueOrDefault(name), OnlineFlags(), NowTimestamp()), new UpdateOptions());
+                        break;
+                    case "analog_output":
+                    case "analog_output_command":
+                        db.AddAnalogOutputStatus(index, EventClass.Class1, new AnalogOutputStatusConfig());
+                        db.UpdateAnalogOutputStatus(new AnalogOutputStatus(index, _pointValues.GetValueOrDefault(name), OnlineFlags(), NowTimestamp()), new UpdateOptions());
+                        break;
+                }
+            }
         }
 
         public async Task RegisterAsset(Asset asset)
@@ -225,11 +344,30 @@ namespace OLRTLabSim.Services
             _endpointAssets.AddOrUpdate(endpoint, new HashSet<string> { name }, (k, v) => { lock (v) v.Add(name); return v; });
 
             double val = asset.CurrentValue;
-            if (pointClass is "binary_input" or "binary_output")
+            if (pointClass is "binary_input" or "binary_output" or "binary_output_command")
                 val = val >= 0.5 ? 1.0 : 0.0;
             _pointValues[name] = val;
 
-            await EnsureEndpoint(ip, port);
+            if (_servers.ContainsKey(endpoint))
+            {
+                await RebuildEndpoint(endpoint);
+            }
+            else
+            {
+                await EnsureEndpoint(ip, port);
+            }
+        }
+
+        private async Task RebuildEndpoint(string endpoint)
+        {
+            if (_servers.TryRemove(endpoint, out var existing))
+            {
+                try { existing.Server.Shutdown(); } catch { }
+            }
+
+            var parts = endpoint.Split(':');
+            if (parts.Length != 2 || !int.TryParse(parts[1], out var port)) return;
+            await EnsureEndpoint(parts[0], port);
         }
 
         public async Task UnregisterAsset(string name)
@@ -249,16 +387,15 @@ namespace OLRTLabSim.Services
                     if (!set.Any())
                     {
                         _endpointAssets.TryRemove(endpoint, out _);
-                        if (_listenerTokens.TryRemove(endpoint, out var cts))
+                        if (_servers.TryRemove(endpoint, out var ctx))
                         {
-                            cts.Cancel();
-                            cts.Dispose();
-                        }
-                        if (_listeners.TryRemove(endpoint, out var listener))
-                        {
-                            listener.Stop();
+                            try { ctx.Server.Shutdown(); } catch { }
                         }
                         StatusMessages[endpoint] = "stopped";
+                    }
+                    else if (_servers.ContainsKey(endpoint))
+                    {
+                        await RebuildEndpoint(endpoint);
                     }
                 }
             }
@@ -271,10 +408,39 @@ namespace OLRTLabSim.Services
 
             string pointClass = mapping.PointClass;
             double val = asset.CurrentValue;
-            if (pointClass is "binary_input" or "binary_output")
+            if (pointClass is "binary_input" or "binary_output" or "binary_output_command")
                 val = val >= 0.5 ? 1.0 : 0.0;
 
             _pointValues[asset.Name] = val;
+
+            if (!_servers.TryGetValue(mapping.Endpoint, out var server)) return;
+
+            try
+            {
+                server.Outstation.Transaction(new OutstationTransaction(db =>
+                {
+                    if (pointClass is "analog_input")
+                    {
+                        db.UpdateAnalog(new Analog(mapping.PointIndex, val, OnlineFlags(), NowTimestamp()), new UpdateOptions());
+                    }
+                    else if (pointClass is "analog_output" or "analog_output_command")
+                    {
+                        db.UpdateAnalogOutputStatus(new AnalogOutputStatus(mapping.PointIndex, val, OnlineFlags(), NowTimestamp()), new UpdateOptions());
+                    }
+                    else if (pointClass is "binary_input")
+                    {
+                        db.UpdateBinary(new Binary(mapping.PointIndex, val >= 0.5, OnlineFlags(), NowTimestamp()), new UpdateOptions());
+                    }
+                    else if (pointClass is "binary_output" or "binary_output_command")
+                    {
+                        db.UpdateBinaryOutputStatus(new BinaryOutputStatus(mapping.PointIndex, val >= 0.5, OnlineFlags(), NowTimestamp()), new UpdateOptions());
+                    }
+                }));
+            }
+            catch (Exception ex)
+            {
+                StatusMessages[mapping.Endpoint] = $"error: {ex.Message}";
+            }
         }
 
         public double? ReadRemoteValue(Asset asset)
@@ -306,6 +472,16 @@ namespace OLRTLabSim.Services
             {
                 await UnregisterAsset(name);
             }
+
+            foreach (var endpoint in _servers.Keys.ToList())
+            {
+                if (_servers.TryRemove(endpoint, out var ctx))
+                {
+                    try { ctx.Server.Shutdown(); } catch { }
+                }
+            }
+
+            try { _runtime.Shutdown(); } catch { }
         }
 
         public object Status()
@@ -313,7 +489,7 @@ namespace OLRTLabSim.Services
             return new
             {
                 dnp3_runtime_ready = Installed,
-                transport_mode = "tcp_listener",
+                transport_mode = "native_outstation",
                 endpoints = _endpointAssets.Keys.ToList(),
                 asset_count = _assetIndex.Count,
                 status_messages = StatusMessages,
