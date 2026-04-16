@@ -51,6 +51,13 @@ namespace OLRTLabSim.Services
             public string WordOrder { get; set; }
         }
 
+        private static bool IsDigitalMapping(AssetMapping mapping)
+        {
+            return string.Equals(mapping.SubType, "Digital", StringComparison.OrdinalIgnoreCase)
+                   || mapping.RegisterType == "coil"
+                   || mapping.RegisterType == "discrete";
+        }
+
         private (string Type, ushort Offset) NormalizeReference(int address, string registerType, bool zeroBased)
         {
             int raw = address;
@@ -59,7 +66,6 @@ namespace OLRTLabSim.Services
             string configured = string.IsNullOrWhiteSpace(registerType) ? "holding" : registerType.Trim().ToLower();
             var tableToDigit = new Dictionary<string, string> { { "coil", "0" }, { "discrete", "1" }, { "input", "3" }, { "holding", "4" } };
             var digitToTable = tableToDigit.ToDictionary(kvp => kvp.Value, kvp => kvp.Key);
-            string configuredDigit = tableToDigit.GetValueOrDefault(configured, "4");
 
             if (raw == 0) return (configured, 0);
 
@@ -67,14 +73,11 @@ namespace OLRTLabSim.Services
             string inferredType = configured;
             int item = raw;
 
-            if (token.Length >= 5 && digitToTable.ContainsKey(token.Substring(0, 1)))
+            // Kepware-style table-prefixed addresses:
+            // 41 / 401 / 4001 / 40001 / 400001 are equivalent for holding item 1.
+            if (token.Length >= 2 && digitToTable.ContainsKey(token.Substring(0, 1)))
             {
                 inferredType = digitToTable[token.Substring(0, 1)];
-                item = int.Parse(token.Substring(1));
-            }
-            else if (token.Length >= 2 && digitToTable.ContainsKey(token.Substring(0, 1)) && token.Substring(0, 1) == configuredDigit)
-            {
-                inferredType = configured;
                 item = int.Parse(token.Substring(1));
             }
             else
@@ -136,8 +139,18 @@ namespace OLRTLabSim.Services
                         {
                             if (mapping.RegisterType == "coil") db.AddCoil(mapping.Address, false);
                             else if (mapping.RegisterType == "discrete") db.AddDiscreteInput(mapping.Address, false);
-                            else if (mapping.RegisterType == "holding") db.AddHoldingRegister(mapping.Address, 0);
-                            else if (mapping.RegisterType == "input") db.AddInputRegister(mapping.Address, 0);
+                            else if (mapping.RegisterType == "holding")
+                            {
+                                db.AddHoldingRegister(mapping.Address, 0);
+                                if (!IsDigitalMapping(mapping))
+                                    db.AddHoldingRegister((ushort)(mapping.Address + 1), 0);
+                            }
+                            else if (mapping.RegisterType == "input")
+                            {
+                                db.AddInputRegister(mapping.Address, 0);
+                                if (!IsDigitalMapping(mapping))
+                                    db.AddInputRegister((ushort)(mapping.Address + 1), 0);
+                            }
                         }
                     });
                 }
@@ -208,8 +221,18 @@ namespace OLRTLabSim.Services
                     {
                         if (mapping.RegisterType == "coil") db.AddCoil(mapping.Address, false);
                         else if (mapping.RegisterType == "discrete") db.AddDiscreteInput(mapping.Address, false);
-                        else if (mapping.RegisterType == "holding") db.AddHoldingRegister(mapping.Address, 0);
-                        else if (mapping.RegisterType == "input") db.AddInputRegister(mapping.Address, 0);
+                        else if (mapping.RegisterType == "holding")
+                        {
+                            db.AddHoldingRegister(mapping.Address, 0);
+                            if (!IsDigitalMapping(mapping))
+                                db.AddHoldingRegister((ushort)(mapping.Address + 1), 0);
+                        }
+                        else if (mapping.RegisterType == "input")
+                        {
+                            db.AddInputRegister(mapping.Address, 0);
+                            if (!IsDigitalMapping(mapping))
+                                db.AddInputRegister((ushort)(mapping.Address + 1), 0);
+                        }
                     });
                 }
             }
@@ -276,14 +299,17 @@ namespace OLRTLabSim.Services
 
                         if (regType == "holding")
                         {
+                            db.AddHoldingRegister(addr, 0);
+                            db.AddHoldingRegister((ushort)(addr + 1), 0);
                             db.UpdateHoldingRegister(addr, firstWord);
-                            // Requires second register to be pre-added
-                            db.AddHoldingRegister((ushort)(addr + 1), secondWord);
+                            db.UpdateHoldingRegister((ushort)(addr + 1), secondWord);
                         }
                         else
                         {
+                            db.AddInputRegister(addr, 0);
+                            db.AddInputRegister((ushort)(addr + 1), 0);
                             db.UpdateInputRegister(addr, firstWord);
-                            db.AddInputRegister((ushort)(addr + 1), secondWord);
+                            db.UpdateInputRegister((ushort)(addr + 1), secondWord);
                         }
                     }
 

@@ -141,12 +141,60 @@ namespace OLRTLabSim.Engine
                         bool assetChanged = false;
                         bool alarmChanged = false;
 
-                        // 1. Remote Write Detection
-                        /* (Placeholder for protocols logic)
-                        if (asset.Protocol == "bacnet" && (asset.ObjectType == "output" || asset.ObjectType == "value")) { ... }
-                        if (asset.Protocol == "modbus") { ... }
-                        if (asset.Protocol == "dnp3") { ... }
-                        */
+                        // 1. Remote write detection (keep active even during manual override)
+                        if (asset.Protocol == "bacnet" && (asset.ObjectType == "output" || asset.ObjectType == "value"))
+                        {
+                            var remote = _bacnetManager.GetValue(asset.Name);
+                            if (remote.HasValue && Math.Abs(remote.Value - originalValue) > 0.01)
+                            {
+                                using var remoteCmd = conn.CreateCommand();
+                                remoteCmd.CommandText = "UPDATE assets SET current_value = @val, manual_override = 1 WHERE id = @id";
+                                remoteCmd.Parameters.AddWithValue("@val", remote.Value);
+                                remoteCmd.Parameters.AddWithValue("@id", asset.Id);
+                                remoteCmd.ExecuteNonQuery();
+                                asset.CurrentValue = remote.Value;
+                                asset.ManualOverride = 1;
+                                assetChanged = true;
+                            }
+                        }
+                        else if (asset.Protocol == "modbus")
+                        {
+                            var registerType = (asset.ModbusRegisterType ?? "").ToLowerInvariant();
+                            if (registerType == "holding" || registerType == "coil")
+                            {
+                                var remote = _modbusManager.ReadRemoteValue(asset);
+                                if (remote.HasValue && Math.Abs(remote.Value - originalValue) > 0.01)
+                                {
+                                    using var remoteCmd = conn.CreateCommand();
+                                    remoteCmd.CommandText = "UPDATE assets SET current_value = @val, manual_override = 1 WHERE id = @id";
+                                    remoteCmd.Parameters.AddWithValue("@val", remote.Value);
+                                    remoteCmd.Parameters.AddWithValue("@id", asset.Id);
+                                    remoteCmd.ExecuteNonQuery();
+                                    asset.CurrentValue = remote.Value;
+                                    asset.ManualOverride = 1;
+                                    assetChanged = true;
+                                }
+                            }
+                        }
+                        else if (asset.Protocol == "dnp3")
+                        {
+                            var pointClass = (asset.Dnp3PointClass ?? "").ToLowerInvariant();
+                            if (pointClass == "analog_output" || pointClass == "binary_output")
+                            {
+                                var remote = _dnp3Manager.ReadRemoteValue(asset);
+                                if (remote.HasValue && Math.Abs(remote.Value - originalValue) > 0.01)
+                                {
+                                    using var remoteCmd = conn.CreateCommand();
+                                    remoteCmd.CommandText = "UPDATE assets SET current_value = @val, manual_override = 1 WHERE id = @id";
+                                    remoteCmd.Parameters.AddWithValue("@val", remote.Value);
+                                    remoteCmd.Parameters.AddWithValue("@id", asset.Id);
+                                    remoteCmd.ExecuteNonQuery();
+                                    asset.CurrentValue = remote.Value;
+                                    asset.ManualOverride = 1;
+                                    assetChanged = true;
+                                }
+                            }
+                        }
 
                         // 2. Automation Logic
                         if (asset.ManualOverride == 0)
@@ -252,15 +300,29 @@ namespace OLRTLabSim.Engine
                         // 4. Update Protocol Runtimes
                         if (asset.Protocol == "bacnet")
                         {
-                            _bacnetManager.UpdateValue(asset.Name, asset.CurrentValue, asset.SubType, asset.IsNormallyOpen);
+                            bool writable = asset.ObjectType == "output" || asset.ObjectType == "value";
+                            if (assetChanged || alarmChanged || !writable)
+                            {
+                                _bacnetManager.UpdateValue(asset.Name, asset.CurrentValue, asset.SubType, asset.IsNormallyOpen);
+                            }
                         }
                         else if (asset.Protocol == "modbus")
                         {
-                            _modbusManager.WriteValue(asset);
+                            var registerType = (asset.ModbusRegisterType ?? "").ToLowerInvariant();
+                            bool writable = registerType == "holding" || registerType == "coil";
+                            if (assetChanged || alarmChanged || !writable)
+                            {
+                                _modbusManager.WriteValue(asset);
+                            }
                         }
                         else if (asset.Protocol == "dnp3")
                         {
-                            _dnp3Manager.WriteValue(asset);
+                            var pointClass = (asset.Dnp3PointClass ?? "").ToLowerInvariant();
+                            bool writable = pointClass == "analog_output" || pointClass == "binary_output";
+                            if (assetChanged || alarmChanged || !writable)
+                            {
+                                _dnp3Manager.WriteValue(asset);
+                            }
                         }
 
                         if (assetChanged)
