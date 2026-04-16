@@ -1,0 +1,6 @@
+@OLRTLabSim_HostAddress = http://localhost:5100
+
+GET {{OLRTLabSim_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
