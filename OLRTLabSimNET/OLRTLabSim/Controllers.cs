@@ -35,44 +35,44 @@ namespace OLRTLabSim.Controllers
             {
                 assets.Add(new {
                     id = reader["id"],
-                    name = reader["name"],
-                    type = reader["type"],
-                    sub_type = reader["sub_type"],
-                    protocol = reader["protocol"],
+                    name = reader["name"]?.ToString(),
+                    type = reader["type"]?.ToString(),
+                    sub_type = reader["sub_type"]?.ToString(),
+                    protocol = reader["protocol"]?.ToString(),
                     address = reader["address"],
                     min_range = reader["min_range"],
                     max_range = reader["max_range"],
                     current_value = reader["current_value"],
                     drift_rate = reader["drift_rate"],
                     manual_override = reader["manual_override"],
-                    icon = reader["icon"],
-                    filename = reader["filename"],
+                    icon = reader["icon"] == DBNull.Value ? null : reader["icon"]?.ToString(),
+                    filename = reader["filename"] == DBNull.Value ? null : reader["filename"]?.ToString(),
                     bacnet_port = reader["bacnet_port"],
                     bacnet_device_id = reader["bacnet_device_id"],
                     is_normally_open = reader["is_normally_open"],
                     change_probability = reader["change_probability"],
                     change_interval = reader["change_interval"],
                     last_flip_check = reader["last_flip_check"],
-                    bbmd_id = reader["bbmd_id"],
-                    object_type = reader["object_type"],
-                    bacnet_properties = reader["bacnet_properties"],
+                    bbmd_id = reader["bbmd_id"] == DBNull.Value ? null : reader["bbmd_id"],
+                    object_type = reader["object_type"]?.ToString(),
+                    bacnet_properties = reader["bacnet_properties"] == DBNull.Value ? "{}" : reader["bacnet_properties"]?.ToString(),
                     modbus_unit_id = reader["modbus_unit_id"],
-                    modbus_register_type = reader["modbus_register_type"],
-                    modbus_ip = reader["modbus_ip"],
+                    modbus_register_type = reader["modbus_register_type"]?.ToString(),
+                    modbus_ip = reader["modbus_ip"] == DBNull.Value ? null : reader["modbus_ip"]?.ToString(),
                     modbus_port = reader["modbus_port"],
-                    modbus_alarm_address = reader["modbus_alarm_address"],
+                    modbus_alarm_address = reader["modbus_alarm_address"] == DBNull.Value ? null : reader["modbus_alarm_address"],
                     modbus_alarm_bit = reader["modbus_alarm_bit"],
                     modbus_zero_based = reader["modbus_zero_based"],
-                    modbus_word_order = reader["modbus_word_order"],
-                    dnp3_ip = reader["dnp3_ip"],
+                    modbus_word_order = reader["modbus_word_order"]?.ToString(),
+                    dnp3_ip = reader["dnp3_ip"] == DBNull.Value ? null : reader["dnp3_ip"]?.ToString(),
                     dnp3_port = reader["dnp3_port"],
                     dnp3_outstation_address = reader["dnp3_outstation_address"],
                     dnp3_master_address = reader["dnp3_master_address"],
-                    dnp3_point_class = reader["dnp3_point_class"],
+                    dnp3_point_class = reader["dnp3_point_class"]?.ToString(),
                     dnp3_event_class = reader["dnp3_event_class"],
                     dnp3_static_variation = reader["dnp3_static_variation"],
                     alarm_state = reader["alarm_state"],
-                    alarm_message = reader["alarm_message"]
+                    alarm_message = reader["alarm_message"] == DBNull.Value ? null : reader["alarm_message"]?.ToString()
                 });
             }
             return Ok(assets);
@@ -129,7 +129,7 @@ namespace OLRTLabSim.Controllers
             cmd.Parameters.AddWithValue("@p16", asset.ChangeInterval > 0 ? asset.ChangeInterval : 15);
             cmd.Parameters.AddWithValue("@p17", Database.GetCurrentUnixTime());
             cmd.Parameters.AddWithValue("@p18", asset.BbmdId ?? (object)DBNull.Value);
-            cmd.Parameters.AddWithValue("@p19", normType);
+            cmd.Parameters.AddWithValue("@p19", (object)(normType ?? "value"));
             cmd.Parameters.AddWithValue("@p20", string.IsNullOrWhiteSpace(asset.BacnetProperties) ? "{}" : asset.BacnetProperties);
             cmd.Parameters.AddWithValue("@p21", asset.ModbusUnitId > 0 ? asset.ModbusUnitId : 1);
             cmd.Parameters.AddWithValue("@p22", (object)(asset.ModbusRegisterType ?? "holding"));
@@ -207,7 +207,7 @@ namespace OLRTLabSim.Controllers
             cmd.Parameters.AddWithValue("@p15", asset.ChangeProbability);
             cmd.Parameters.AddWithValue("@p16", asset.ChangeInterval > 0 ? asset.ChangeInterval : 15);
             cmd.Parameters.AddWithValue("@p18", asset.BbmdId ?? (object)DBNull.Value);
-            cmd.Parameters.AddWithValue("@p19", normType);
+            cmd.Parameters.AddWithValue("@p19", (object)(normType ?? "value"));
             cmd.Parameters.AddWithValue("@p20", string.IsNullOrWhiteSpace(asset.BacnetProperties) ? "{}" : asset.BacnetProperties);
             cmd.Parameters.AddWithValue("@p21", asset.ModbusUnitId > 0 ? asset.ModbusUnitId : 1);
             cmd.Parameters.AddWithValue("@p22", (object)(asset.ModbusRegisterType ?? "holding"));
@@ -274,11 +274,11 @@ namespace OLRTLabSim.Controllers
             {
                 bbmds.Add(new {
                     id = reader["id"],
-                    name = reader["name"],
-                    description = reader["description"],
+                    name = reader["name"]?.ToString(),
+                    description = reader["description"] == DBNull.Value ? null : reader["description"]?.ToString(),
                     port = reader["port"],
                     device_id = reader["device_id"],
-                    ip_address = reader["ip_address"],
+                    ip_address = reader["ip_address"] == DBNull.Value ? null : reader["ip_address"]?.ToString(),
                     enabled = reader["enabled"],
                     created_at = reader["created_at"]
                 });
