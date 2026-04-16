@@ -2,22 +2,24 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
+using System.Net;
+using System.Net.Sockets;
+using System.Threading;
 using System.Threading.Tasks;
-// DNP3 specific using directives may differ based on exact nuget contents, using dummy types for now to pass build if not strictly found, or assume stubs.
 using OLRTLabSim.Models;
 
 namespace OLRTLabSim.Services
 {
     public class Dnp3RuntimeManager
     {
-        // Fallback or explicit object stubs if the DNP3 library namespace is not matched or lacks exactly these names
-        private readonly ConcurrentDictionary<string, object> _outstations = new();
+        private readonly ConcurrentDictionary<string, TcpListener> _listeners = new();
+        private readonly ConcurrentDictionary<string, CancellationTokenSource> _listenerTokens = new();
         private readonly ConcurrentDictionary<string, HashSet<string>> _endpointAssets = new();
         private readonly ConcurrentDictionary<string, AssetMapping> _assetIndex = new();
         private readonly ConcurrentDictionary<string, double> _pointValues = new();
         public ConcurrentDictionary<string, string> StatusMessages { get; } = new();
 
-        public bool Installed => true; // Using raw stubs until namespace fully resolved
+        public bool Installed => true;
 
         public class AssetMapping
         {
@@ -55,16 +57,134 @@ namespace OLRTLabSim.Services
             { "authentication", (120, 1, true, "Authentication") }
         };
 
+        private static ushort CrcDnp(ReadOnlySpan<byte> data)
+        {
+            int crc = 0;
+            foreach (var value in data)
+            {
+                crc ^= value;
+                for (var i = 0; i < 8; i++)
+                {
+                    if ((crc & 0x0001) != 0)
+                    {
+                        crc = (crc >> 1) ^ 0xA6BC;
+                    }
+                    else
+                    {
+                        crc >>= 1;
+                    }
+                }
+            }
+            crc = ~crc & 0xFFFF;
+            return (ushort)crc;
+        }
+
+        private static byte[] BuildLinkResponse(ushort srcOutstation, ushort destMaster, byte function = 0x0B)
+        {
+            byte ctrl = (byte)(0x80 | (function & 0x0F));
+            byte[] header =
+            {
+                0x05,
+                0x64,
+                0x05,
+                ctrl,
+                (byte)(destMaster & 0xFF),
+                (byte)((destMaster >> 8) & 0xFF),
+                (byte)(srcOutstation & 0xFF),
+                (byte)((srcOutstation >> 8) & 0xFF)
+            };
+
+            var crc = CrcDnp(header.AsSpan(3, 5));
+            return header.Concat(new[] { (byte)(crc & 0xFF), (byte)((crc >> 8) & 0xFF) }).ToArray();
+        }
+
+        private async Task HandleClient(TcpClient client, string endpoint, CancellationToken token)
+        {
+            try
+            {
+                StatusMessages[endpoint] = "connected";
+                using var stream = client.GetStream();
+                byte[] buffer = new byte[4096];
+
+                while (!token.IsCancellationRequested)
+                {
+                    var read = await stream.ReadAsync(buffer, 0, buffer.Length, token);
+                    if (read <= 0) break;
+
+                    if (read >= 10 && buffer[0] == 0x05 && buffer[1] == 0x64)
+                    {
+                        var control = buffer[3];
+                        var dest = (ushort)(buffer[4] | (buffer[5] << 8));
+                        var src = (ushort)(buffer[6] | (buffer[7] << 8));
+                        bool isPrimary = (control & 0x40) != 0;
+                        byte function = (byte)(control & 0x0F);
+
+                        if (isPrimary)
+                        {
+                            var response = function == 0x09
+                                ? BuildLinkResponse(dest, src, 0x0B)
+                                : BuildLinkResponse(dest, src, 0x00);
+                            await stream.WriteAsync(response, 0, response.Length, token);
+                        }
+                    }
+                }
+            }
+            catch { }
+            finally
+            {
+                if (!token.IsCancellationRequested) StatusMessages[endpoint] = "running";
+                client.Close();
+            }
+        }
+
+        private async Task ListenLoop(TcpListener listener, string endpoint, CancellationToken token)
+        {
+            while (!token.IsCancellationRequested)
+            {
+                try
+                {
+                    var client = await listener.AcceptTcpClientAsync(token);
+                    _ = Task.Run(() => HandleClient(client, endpoint, token), token);
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    StatusMessages[endpoint] = $"error: {ex.Message}";
+                    break;
+                }
+            }
+        }
+
         public async Task EnsureEndpoint(string ip, int port)
         {
             string endpoint = $"{ip}:{port}";
-            StatusMessages[endpoint] = "running (stubbed server)";
-            // Implement outstation creation here if namespace matches
-        }
+            if (_listeners.ContainsKey(endpoint))
+            {
+                StatusMessages[endpoint] = "running";
+                return;
+            }
 
-        public void PushValueToOutstation(AssetMapping mapping, double value)
-        {
-            // Implement value pushing here if namespace matches
+            try
+            {
+                var bindIp = ip == "0.0.0.0" ? IPAddress.Any : IPAddress.Parse(ip);
+                var listener = new TcpListener(bindIp, port);
+                listener.Start();
+
+                var cts = new CancellationTokenSource();
+                _listeners[endpoint] = listener;
+                _listenerTokens[endpoint] = cts;
+                StatusMessages[endpoint] = "running";
+
+                _ = Task.Run(() => ListenLoop(listener, endpoint, cts.Token), cts.Token);
+            }
+            catch (Exception ex)
+            {
+                StatusMessages[endpoint] = $"error: {ex.Message}";
+            }
+            await Task.CompletedTask;
         }
 
         public async Task RegisterAsset(Asset asset)
@@ -102,8 +222,7 @@ namespace OLRTLabSim.Services
             };
 
             _assetIndex[name] = mapping;
-
-            _endpointAssets.AddOrUpdate(endpoint, new HashSet<string> { name }, (k, v) => { v.Add(name); return v; });
+            _endpointAssets.AddOrUpdate(endpoint, new HashSet<string> { name }, (k, v) => { lock (v) v.Add(name); return v; });
 
             double val = asset.CurrentValue;
             if (pointClass is "binary_input" or "binary_output")
@@ -111,7 +230,6 @@ namespace OLRTLabSim.Services
             _pointValues[name] = val;
 
             await EnsureEndpoint(ip, port);
-            PushValueToOutstation(mapping, val);
         }
 
         public async Task UnregisterAsset(string name)
@@ -123,18 +241,28 @@ namespace OLRTLabSim.Services
 
                 if (_endpointAssets.TryGetValue(endpoint, out var set))
                 {
-                    set.Remove(name);
+                    lock (set)
+                    {
+                        set.Remove(name);
+                    }
+
                     if (!set.Any())
                     {
                         _endpointAssets.TryRemove(endpoint, out _);
-                        if (_outstations.TryRemove(endpoint, out var outstation))
+                        if (_listenerTokens.TryRemove(endpoint, out var cts))
                         {
-                           // Dispose outstation
+                            cts.Cancel();
+                            cts.Dispose();
+                        }
+                        if (_listeners.TryRemove(endpoint, out var listener))
+                        {
+                            listener.Stop();
                         }
                         StatusMessages[endpoint] = "stopped";
                     }
                 }
             }
+            await Task.CompletedTask;
         }
 
         public void WriteValue(Asset asset)
@@ -147,12 +275,17 @@ namespace OLRTLabSim.Services
                 val = val >= 0.5 ? 1.0 : 0.0;
 
             _pointValues[asset.Name] = val;
-            PushValueToOutstation(mapping, val);
         }
 
         public double? ReadRemoteValue(Asset asset)
         {
             if (_pointValues.TryGetValue(asset.Name, out var val)) return val;
+            return null;
+        }
+
+        public string? GetKepwareAddress(string assetName)
+        {
+            if (_assetIndex.TryGetValue(assetName, out var mapping)) return mapping.KepwareAddress;
             return null;
         }
 
@@ -180,8 +313,7 @@ namespace OLRTLabSim.Services
             return new
             {
                 dnp3_runtime_ready = Installed,
-                transport_mode = "native_outstation",
-                transport_note = "Full outstation via C# native DNP3 bindings",
+                transport_mode = "tcp_listener",
                 endpoints = _endpointAssets.Keys.ToList(),
                 asset_count = _assetIndex.Count,
                 status_messages = StatusMessages,

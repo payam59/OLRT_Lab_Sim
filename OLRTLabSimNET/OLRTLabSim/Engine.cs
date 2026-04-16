@@ -7,21 +7,21 @@ using System.Threading.Tasks;
 using Microsoft.Extensions.Hosting;
 using OLRTLabSim.Models;
 using OLRTLabSim.Data;
-// using OLRTLabSim.Services; // Assuming protocols and websocket managers are available in Services
+using OLRTLabSim.Services;
 
 namespace OLRTLabSim.Engine
 {
     public class SimulationEngine : BackgroundService
     {
-        // Placeholders for Protocol Managers
-        // private readonly ModbusRuntimeManager _modbusManager;
-        // private readonly BacnetRuntimeManager _bacnetManager;
-        // private readonly Dnp3RuntimeManager _dnp3Manager;
-        // private readonly WebSocketManager _wsManager;
+        private readonly ModbusRuntimeManager _modbusManager;
+        private readonly BacnetRuntimeManager _bacnetManager;
+        private readonly Dnp3RuntimeManager _dnp3Manager;
 
-        public SimulationEngine()
+        public SimulationEngine(ModbusRuntimeManager modbusManager, BacnetRuntimeManager bacnetManager, Dnp3RuntimeManager dnp3Manager)
         {
-            // Managers injected here
+            _modbusManager = modbusManager;
+            _bacnetManager = bacnetManager;
+            _dnp3Manager = dnp3Manager;
         }
 
         private (bool InAlarm, string Message) CheckAlarmCondition(Asset asset)
@@ -43,6 +43,7 @@ namespace OLRTLabSim.Engine
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
             var rnd = new Random();
+            var bootstrapped = false;
 
             while (!stoppingToken.IsCancellationRequested)
             {
@@ -102,6 +103,33 @@ namespace OLRTLabSim.Engine
                                 });
                             }
                         }
+                    }
+                    if (!bootstrapped)
+                    {
+                        var bbmds = new List<Bbmd>();
+                        using (var bbmdCmd = conn.CreateCommand())
+                        {
+                            bbmdCmd.CommandText = "SELECT * FROM bbmd";
+                            using var bbmdReader = bbmdCmd.ExecuteReader();
+                            while (bbmdReader.Read())
+                            {
+                                bbmds.Add(new Bbmd
+                                {
+                                    Id = Convert.ToInt64(bbmdReader["id"]),
+                                    Name = bbmdReader["name"].ToString(),
+                                    Description = bbmdReader["description"] == DBNull.Value ? null : bbmdReader["description"].ToString(),
+                                    Port = Convert.ToInt64(bbmdReader["port"]),
+                                    DeviceId = Convert.ToInt64(bbmdReader["device_id"]),
+                                    IpAddress = bbmdReader["ip_address"] == DBNull.Value ? "0.0.0.0" : bbmdReader["ip_address"].ToString(),
+                                    Enabled = Convert.ToInt64(bbmdReader["enabled"])
+                                });
+                            }
+                        }
+
+                        await _bacnetManager.Bootstrap(assets, bbmds);
+                        await _modbusManager.Bootstrap(assets);
+                        await _dnp3Manager.Bootstrap(assets);
+                        bootstrapped = true;
                     }
 
                     double now = Database.GetCurrentUnixTime();
@@ -222,7 +250,18 @@ namespace OLRTLabSim.Engine
                         }
 
                         // 4. Update Protocol Runtimes
-                        // (Placeholder for protocol update calls)
+                        if (asset.Protocol == "bacnet")
+                        {
+                            _bacnetManager.UpdateValue(asset.Name, asset.CurrentValue, asset.SubType, asset.IsNormallyOpen);
+                        }
+                        else if (asset.Protocol == "modbus")
+                        {
+                            _modbusManager.WriteValue(asset);
+                        }
+                        else if (asset.Protocol == "dnp3")
+                        {
+                            _dnp3Manager.WriteValue(asset);
+                        }
 
                         if (assetChanged)
                             anyGlobalChange = true;

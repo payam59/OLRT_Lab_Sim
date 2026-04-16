@@ -25,6 +25,7 @@ namespace OLRTLabSim.Services
         private readonly rodbus.Runtime _rodbusRuntime;
         private readonly ConcurrentDictionary<string, rodbus.Server> _tcpServers = new();
         private readonly ConcurrentDictionary<string, HashSet<string>> _endpointAssets = new();
+        private readonly ConcurrentDictionary<string, HashSet<byte>> _endpointUnitIds = new();
         private readonly ConcurrentDictionary<string, AssetMapping> _assetIndex = new();
 
         public ConcurrentDictionary<string, string> StatusMessages { get; } = new();
@@ -88,25 +89,24 @@ namespace OLRTLabSim.Services
             return (inferredType, (ushort)offset);
         }
 
-        public async Task EnsureEndpoint(string ip, int port, int unitId)
+        private async Task RebuildEndpoint(string endpoint, string ip, int port)
         {
-            string endpoint = $"{ip}:{port}";
-            if (_tcpServers.ContainsKey(endpoint)) return;
+            if (_tcpServers.TryRemove(endpoint, out var existing))
+            {
+                existing.Shutdown();
+            }
 
             try
             {
-                // To create a rodbus server, we need a DeviceMap.
-                // We map all configured unitIds for this endpoint
                 var endpointsMap = new rodbus.DeviceMap();
-
-                // Find all unitIds required for this endpoint
                 var unitIds = _assetIndex.Values
                     .Where(m => m.Endpoint == endpoint)
                     .Select(m => (byte)m.UnitId)
                     .Distinct()
                     .ToList();
 
-                if (!unitIds.Any()) unitIds.Add(1); // default
+                if (!unitIds.Any()) unitIds.Add(1);
+                _endpointUnitIds[endpoint] = unitIds.ToHashSet();
 
                 foreach (var uid in unitIds)
                 {
@@ -148,6 +148,14 @@ namespace OLRTLabSim.Services
             {
                 StatusMessages[endpoint] = $"error: {ex.Message}";
             }
+            await Task.CompletedTask;
+        }
+
+        public async Task EnsureEndpoint(string ip, int port, int unitId)
+        {
+            string endpoint = $"{ip}:{port}";
+            if (_tcpServers.ContainsKey(endpoint)) return;
+            await RebuildEndpoint(endpoint, ip, port);
         }
 
         public async Task RegisterAsset(Asset asset)
@@ -182,21 +190,28 @@ namespace OLRTLabSim.Services
                 WordOrder = string.IsNullOrWhiteSpace(asset.ModbusWordOrder) ? "low_high" : asset.ModbusWordOrder
             };
 
+            var isNewUnitForEndpoint = !_endpointUnitIds.TryGetValue(endpoint, out var existingUnits) || !existingUnits.Contains((byte)unitId);
+
             _assetIndex[name] = mapping;
             _endpointAssets.AddOrUpdate(endpoint, new HashSet<string> { name }, (k, v) => { v.Add(name); return v; });
+            _endpointUnitIds.AddOrUpdate(endpoint, new HashSet<byte> { (byte)unitId }, (k, v) => { v.Add((byte)unitId); return v; });
 
-            // If the server is already running, we might need to restart it if a NEW unit ID is introduced,
-            // or just dynamically update the database. Rodbus handles adding to db on the fly.
             if (_tcpServers.TryGetValue(endpoint, out var server))
             {
-                // Add the register to the DB if it's missing. Add* methods overwrite or create.
-                server.UpdateDatabase((byte)unitId, db =>
+                if (isNewUnitForEndpoint)
                 {
-                    if (mapping.RegisterType == "coil") db.AddCoil(mapping.Address, false);
-                    else if (mapping.RegisterType == "discrete") db.AddDiscreteInput(mapping.Address, false);
-                    else if (mapping.RegisterType == "holding") db.AddHoldingRegister(mapping.Address, 0);
-                    else if (mapping.RegisterType == "input") db.AddInputRegister(mapping.Address, 0);
-                });
+                    await RebuildEndpoint(endpoint, ip, port);
+                }
+                else
+                {
+                    server.UpdateDatabase((byte)unitId, db =>
+                    {
+                        if (mapping.RegisterType == "coil") db.AddCoil(mapping.Address, false);
+                        else if (mapping.RegisterType == "discrete") db.AddDiscreteInput(mapping.Address, false);
+                        else if (mapping.RegisterType == "holding") db.AddHoldingRegister(mapping.Address, 0);
+                        else if (mapping.RegisterType == "input") db.AddInputRegister(mapping.Address, 0);
+                    });
+                }
             }
             else
             {
@@ -217,6 +232,7 @@ namespace OLRTLabSim.Services
                     if (!set.Any())
                     {
                         _endpointAssets.TryRemove(endpoint, out _);
+                        _endpointUnitIds.TryRemove(endpoint, out _);
                         if (_tcpServers.TryRemove(endpoint, out var server))
                         {
                             server.Shutdown();
