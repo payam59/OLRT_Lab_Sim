@@ -136,4 +136,4 @@ OLRT_Lab_Sim/
 - Configuration is currently code-defined; environment-based config can be added later.
 
 ## License
-This project is licensed under the *GPL License**. See [LICENSE](./LICENSE) for full text.
+This project is licensed under the **GPL License**. See [LICENSE](./LICENSE) for full text.
