@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using dnp3;
+using dnp3.functional;
 using OLRTLabSim.Models;
 
 namespace OLRTLabSim.Services
@@ -22,7 +23,7 @@ namespace OLRTLabSim.Services
 
         private sealed class ServerContext
         {
-            public required TcpServer Server { get; init; }
+            public required OutstationServer Server { get; init; }
             public required Outstation Outstation { get; init; }
             public required ControlHandlerImpl ControlHandler { get; init; }
             public required string Endpoint { get; init; }
@@ -93,8 +94,26 @@ namespace OLRTLabSim.Services
             public ApplicationIin GetApplicationIin() => new();
             public RestartDelay ColdRestart() => RestartDelay.NotSupported();
             public RestartDelay WarmRestart() => RestartDelay.NotSupported();
-            public FreezeResult FreezeCountersAll(FreezeType freezeType, Database database) => FreezeResult.NotSupported;
-            public FreezeResult FreezeCountersRange(ushort start, ushort stop, FreezeType freezeType, Database database) => FreezeResult.NotSupported;
+
+            public FreezeResult FreezeCountersAll(FreezeType freezeType, DatabaseHandle database) => FreezeResult.NotSupported;
+            public FreezeResult FreezeCountersAllAtTime(DatabaseHandle databaseHandle, ulong time, uint interval) => FreezeResult.NotSupported;
+            public FreezeResult FreezeCountersRange(ushort start, ushort stop, FreezeType freezeType, DatabaseHandle database) => FreezeResult.NotSupported;
+            public FreezeResult FreezeCountersRangeAtTime(ushort start, ushort stop, DatabaseHandle databaseHandle, ulong time, uint interval) => FreezeResult.NotSupported;
+            public bool SupportWriteAnalogDeadBands() => false;
+            public void BeginWriteAnalogDeadBands() { }
+            public void WriteAnalogDeadBand(ushort index, double deadBand) { }
+            public void EndWriteAnalogDeadBands() { }
+            public bool WriteStringAttr(byte set, byte variation, StringAttr attrType, string value) => false;
+            public bool WriteFloatAttr(byte set, byte variation, FloatAttr attrType, float value) => false;
+            public bool WriteDoubleAttr(byte set, byte variation, FloatAttr attrType, double value) => false;
+            public bool WriteUintAttr(byte set, byte variation, UintAttr attrType, uint value) => false;
+            public bool WriteIntAttr(byte set, byte variation, IntAttr attrType, int value) => false;
+            public bool WriteOctetStringAttr(byte set, byte variation, OctetStringAttr attrType, ICollection<byte> value) => false;
+            public bool WriteBitStringAttr(byte set, byte variation, BitStringAttr attrType, ICollection<byte> value) => false;
+            public bool WriteTimeAttr(byte set, byte variation, TimeAttr attrType, ulong value) => false;
+            public void BeginConfirm() { }
+            public void EventCleared(ulong id) { }
+            public void EndConfirm(BufferState state) { }
         }
 
         private sealed class OutstationInfoImpl : IOutstationInformation
@@ -127,7 +146,7 @@ namespace OLRTLabSim.Services
             }
 
             public void BeginFragment() { }
-            public void EndFragment() { }
+            public void EndFragment(DatabaseHandle database) { }
 
             private bool SupportsBinary(ushort index)
             {
@@ -155,43 +174,43 @@ namespace OLRTLabSim.Services
                 return SupportsAnalog(index) ? CommandStatus.Success : CommandStatus.NotSupported;
             }
 
-            private CommandStatus OperateAnalog(double value, ushort index, Database database)
+            private CommandStatus OperateAnalog(double value, ushort index, DatabaseHandle database)
             {
                 if (!SupportsAnalog(index)) return CommandStatus.NotSupported;
 
-                database.UpdateAnalogOutputStatus(
+                database.Transaction(db => db.UpdateAnalogOutputStatus(
                     new AnalogOutputStatus(index, value, OnlineFlags(), NowTimestamp()),
-                    new UpdateOptions());
+                    UpdateOptions.DetectEvent()));
                 CommitValue(index, value);
                 return CommandStatus.Success;
             }
 
-            public CommandStatus SelectG12v1(G12v1 control, ushort index, Database database)
+            public CommandStatus SelectG12v1(Group12Var1 control, ushort index, DatabaseHandle database)
             {
                 return SupportsBinary(index) ? CommandStatus.Success : CommandStatus.NotSupported;
             }
 
-            public CommandStatus OperateG12v1(G12v1 control, ushort index, OperateType opType, Database database)
+            public CommandStatus OperateG12v1(Group12Var1 control, ushort index, OperateType opType, DatabaseHandle database)
             {
                 if (!SupportsBinary(index)) return CommandStatus.NotSupported;
 
-                var value = control.Code == ControlCode.LatchOn || control.Code == ControlCode.PulseOn;
-                database.UpdateBinaryOutputStatus(
+                var value = control.Code.OpType == OpType.LatchOn || control.Code.OpType == OpType.PulseOn;
+                database.Transaction(db => db.UpdateBinaryOutputStatus(
                     new BinaryOutputStatus(index, value, OnlineFlags(), NowTimestamp()),
-                    new UpdateOptions());
+                    UpdateOptions.DetectEvent()));
                 CommitValue(index, value ? 1.0 : 0.0);
                 return CommandStatus.Success;
             }
 
-            public CommandStatus SelectG41v1(int control, ushort index, Database database) => SelectAnalog(index);
-            public CommandStatus SelectG41v2(short value, ushort index, Database database) => SelectAnalog(index);
-            public CommandStatus SelectG41v3(float value, ushort index, Database database) => SelectAnalog(index);
-            public CommandStatus SelectG41v4(double value, ushort index, Database database) => SelectAnalog(index);
+            public CommandStatus SelectG41v1(int control, ushort index, DatabaseHandle database) => SelectAnalog(index);
+            public CommandStatus SelectG41v2(short value, ushort index, DatabaseHandle database) => SelectAnalog(index);
+            public CommandStatus SelectG41v3(float value, ushort index, DatabaseHandle database) => SelectAnalog(index);
+            public CommandStatus SelectG41v4(double value, ushort index, DatabaseHandle database) => SelectAnalog(index);
 
-            public CommandStatus OperateG41v1(int control, ushort index, OperateType opType, Database database) => OperateAnalog(control, index, database);
-            public CommandStatus OperateG41v2(short value, ushort index, OperateType opType, Database database) => OperateAnalog(value, index, database);
-            public CommandStatus OperateG41v3(float value, ushort index, OperateType opType, Database database) => OperateAnalog(value, index, database);
-            public CommandStatus OperateG41v4(double value, ushort index, OperateType opType, Database database) => OperateAnalog(value, index, database);
+            public CommandStatus OperateG41v1(int control, ushort index, OperateType opType, DatabaseHandle database) => OperateAnalog(control, index, database);
+            public CommandStatus OperateG41v2(short value, ushort index, OperateType opType, DatabaseHandle database) => OperateAnalog(value, index, database);
+            public CommandStatus OperateG41v3(float value, ushort index, OperateType opType, DatabaseHandle database) => OperateAnalog(value, index, database);
+            public CommandStatus OperateG41v4(double value, ushort index, OperateType opType, DatabaseHandle database) => OperateAnalog(value, index, database);
         }
 
         public async Task EnsureEndpoint(string ip, int port)
@@ -234,22 +253,22 @@ namespace OLRTLabSim.Services
 
             try
             {
-                var server = new TcpServer(_runtime, LinkErrorMode.Close, endpoint);
+                var server = OutstationServer.CreateTcpServer(_runtime, LinkErrorMode.Close, endpoint);
                 var controlHandler = new ControlHandlerImpl(_assetIndex, _pointValues, endpoint);
 
                 var outstation = server.AddOutstation(
-                    new OutstationConfig(firstMapping.OutstationAddress, firstMapping.MasterAddress),
-                    EventBufferConfig.AllTypes(100),
+                    new OutstationConfig(firstMapping.OutstationAddress, firstMapping.MasterAddress, new EventBufferConfig(100, 100, 100, 100, 100, 100, 100, 100)),
+
                     new OutstationAppImpl(),
                     new OutstationInfoImpl(),
                     controlHandler,
-                    new ConnectionStateListener(state =>
+                    ConnectionStateListener.create(state =>
                     {
                         StatusMessages[endpoint] = state == ConnectionState.Connected ? "connected" : "running";
                     }),
                     AddressFilter.Any());
 
-                outstation.Transaction(new OutstationTransaction(db => InitializeDatabase(db, endpoint)));
+                outstation.Transaction(db => InitializeDatabase(db, endpoint));
                 server.Bind();
 
                 _servers[endpoint] = new ServerContext
@@ -285,22 +304,22 @@ namespace OLRTLabSim.Services
                 switch (mapping.PointClass)
                 {
                     case "binary_input":
-                        db.AddBinary(index, EventClass.Class1, new BinaryConfig());
-                        db.UpdateBinary(new Binary(index, (_pointValues.GetValueOrDefault(name) >= 0.5), OnlineFlags(), NowTimestamp()), new UpdateOptions());
+                        db.AddBinaryInput(index, EventClass.Class1, new BinaryInputConfig());
+                        db.UpdateBinaryInput(new BinaryInput(index, (_pointValues.GetValueOrDefault(name) >= 0.5), OnlineFlags(), NowTimestamp()), UpdateOptions.DetectEvent());
                         break;
                     case "binary_output":
                     case "binary_output_command":
                         db.AddBinaryOutputStatus(index, EventClass.Class1, new BinaryOutputStatusConfig());
-                        db.UpdateBinaryOutputStatus(new BinaryOutputStatus(index, (_pointValues.GetValueOrDefault(name) >= 0.5), OnlineFlags(), NowTimestamp()), new UpdateOptions());
+                        db.UpdateBinaryOutputStatus(new BinaryOutputStatus(index, (_pointValues.GetValueOrDefault(name) >= 0.5), OnlineFlags(), NowTimestamp()), UpdateOptions.DetectEvent());
                         break;
                     case "analog_input":
-                        db.AddAnalog(index, EventClass.Class1, new AnalogConfig());
-                        db.UpdateAnalog(new Analog(index, _pointValues.GetValueOrDefault(name), OnlineFlags(), NowTimestamp()), new UpdateOptions());
+                        db.AddAnalogInput(index, EventClass.Class1, new AnalogInputConfig());
+                        db.UpdateAnalogInput(new AnalogInput(index, _pointValues.GetValueOrDefault(name), OnlineFlags(), NowTimestamp()), UpdateOptions.DetectEvent());
                         break;
                     case "analog_output":
                     case "analog_output_command":
                         db.AddAnalogOutputStatus(index, EventClass.Class1, new AnalogOutputStatusConfig());
-                        db.UpdateAnalogOutputStatus(new AnalogOutputStatus(index, _pointValues.GetValueOrDefault(name), OnlineFlags(), NowTimestamp()), new UpdateOptions());
+                        db.UpdateAnalogOutputStatus(new AnalogOutputStatus(index, _pointValues.GetValueOrDefault(name), OnlineFlags(), NowTimestamp()), UpdateOptions.DetectEvent());
                         break;
                 }
             }
@@ -417,25 +436,25 @@ namespace OLRTLabSim.Services
 
             try
             {
-                server.Outstation.Transaction(new OutstationTransaction(db =>
+                server.Outstation.Transaction(db =>
                 {
                     if (pointClass is "analog_input")
                     {
-                        db.UpdateAnalog(new Analog(mapping.PointIndex, val, OnlineFlags(), NowTimestamp()), new UpdateOptions());
+                        db.UpdateAnalogInput(new AnalogInput(mapping.PointIndex, val, OnlineFlags(), NowTimestamp()), UpdateOptions.DetectEvent());
                     }
                     else if (pointClass is "analog_output" or "analog_output_command")
                     {
-                        db.UpdateAnalogOutputStatus(new AnalogOutputStatus(mapping.PointIndex, val, OnlineFlags(), NowTimestamp()), new UpdateOptions());
+                        db.UpdateAnalogOutputStatus(new AnalogOutputStatus(mapping.PointIndex, val, OnlineFlags(), NowTimestamp()), UpdateOptions.DetectEvent());
                     }
                     else if (pointClass is "binary_input")
                     {
-                        db.UpdateBinary(new Binary(mapping.PointIndex, val >= 0.5, OnlineFlags(), NowTimestamp()), new UpdateOptions());
+                        db.UpdateBinaryInput(new BinaryInput(mapping.PointIndex, val >= 0.5, OnlineFlags(), NowTimestamp()), UpdateOptions.DetectEvent());
                     }
                     else if (pointClass is "binary_output" or "binary_output_command")
                     {
-                        db.UpdateBinaryOutputStatus(new BinaryOutputStatus(mapping.PointIndex, val >= 0.5, OnlineFlags(), NowTimestamp()), new UpdateOptions());
+                        db.UpdateBinaryOutputStatus(new BinaryOutputStatus(mapping.PointIndex, val >= 0.5, OnlineFlags(), NowTimestamp()), UpdateOptions.DetectEvent());
                     }
-                }));
+                });
             }
             catch (Exception ex)
             {
